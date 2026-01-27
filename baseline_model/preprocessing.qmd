@@ -1,0 +1,45 @@
+```{python}
+import pandas as pd
+import numpy as np
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
+from sklearn.impute import SimpleImputer
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+base = r"F:\MOD002691 - FP\pi_cai_project"
+csv_path = base + r"\picai_labels\clinical_information\split_data\train_clinical.csv"
+```
+```{python}
+df = pd.read_csv(csv_path)
+
+print("Columns in marksheet.csv:")
+
+print(df.columns.tolist())
+
+df.shape
+
+features = ['psa', 'psad', 'patient_age', 'prostate_volume']
+
+target = 'case_csPCa'
+```
+
+```{python}
+ # Verify columns exist
+missing_cols = [col for col in features + [target] if col not in df.columns]
+if missing_cols:
+
+    print(f"Missing columns: {missing_cols}")
+
+    print("Available:", df.columns.tolist())
+```
+```{python}
+
+```
+ X = df[features].copy()
+    y_raw = df[target]
+    
+    print(f"\n📊 Raw data:")
+    print(f"  Features: {features}")
+    print(f"  Target dist: {y_raw.value_counts().to_dict()}")
+```
