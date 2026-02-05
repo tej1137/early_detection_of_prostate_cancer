@@ -1,0 +1,149 @@
+---
+title: "Baseline Model"
+format:
+  pdf:
+    toc: true
+    number-sections: true
+    fig-cap-location: top
+    fig-align: center
+execute:
+  warning: false
+  message: false
+---
+```{python}
+import os
+import pandas as pd
+import numpy as np
+import joblib
+
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import (
+    confusion_matrix,
+    classification_report,
+    roc_auc_score,
+    average_precision_score,
+    accuracy_score,
+    precision_score,
+    recall_score,
+    f1_score,
+)
+
+# -------- paths (edit) --------
+train_csv = r"F:\MOD002691 - FP\pi_cai_project\picai_labels\clinical_information\preprocessed_data\preprocessed_train.csv"
+val_csv   = r"F:\MOD002691 - FP\pi_cai_project\picai_labels\clinical_information\preprocessed_data\preprocessed_val.csv"
+model_name   = "rf_train_only_1"
+#change folder name on iteration
+out_dir      = rf"F:\MOD002691 - FP\output_files\randomforest\{model_name}" # output folder 
+
+model_path   = os.path.join(out_dir, f"{model_name}.joblib")
+metrics_path = os.path.join(out_dir, f"{model_name}_val_metrics.csv")
+preds_path   = os.path.join(out_dir, f"{model_name}_val_predictions.csv")
+fi_path      = os.path.join(out_dir, f"{model_name}_feature_importance.csv")
+# ------------------------------
+
+os.makedirs(out_dir, exist_ok=True)
+
+target = "case_csPCa"
+
+# Load data
+train_df = pd.read_csv(train_csv)
+val_df   = pd.read_csv(val_csv)
+
+X_train = train_df.drop(columns=[target])
+y_train = train_df[target].astype(int)
+
+X_val = val_df.drop(columns=[target])
+y_val = val_df[target].astype(int)
+
+# Align val columns to train columns (safety)
+missing_cols = [c for c in X_train.columns if c not in X_val.columns]
+for c in missing_cols:
+    X_val[c] = 0
+X_val = X_val[X_train.columns]
+
+extra_cols = [c for c in X_val.columns if c not in X_train.columns]
+if extra_cols:
+    X_val = X_val.drop(columns=extra_cols)
+
+print("Missing cols added to val:", missing_cols)
+
+# ----- Random Forest model (baseline) -----
+model = RandomForestClassifier(
+    n_estimators=300,
+    max_depth=None,
+    min_samples_leaf=5,
+    class_weight="balanced",   # handles imbalance by weighting classes [web:430][web:405]
+    random_state=42,
+    n_jobs=-1,
+)
+model.fit(X_train, y_train)
+
+joblib.dump(model, model_path) 
+print(f"Model saved to: {model_path}")
+
+# Feature importance from RandomForest (mean decrease impurity) [web:422][web:427]
+if hasattr(model, "feature_importances_"):
+    fi = pd.DataFrame({
+        "feature": X_train.columns,
+        "importance": model.feature_importances_,
+    }).sort_values("importance", ascending=False, ignore_index=True)
+    fi["rank"] = fi.index + 1
+    total = fi["importance"].sum()
+    fi["importance_normalized"] = fi["importance"] / total if total > 0 else fi["importance"]
+    fi.to_csv(fi_path, index=False)
+    print("\nTop 20 features (Random Forest):\n", fi.head(20).to_string(index=False))
+    print("Feature importances saved to:", fi_path)
+
+# ----- Validation evaluation only -----
+if hasattr(model, "predict_proba"):
+    y_proba = model.predict_proba(X_val)[:, 1]
+else:
+    y_proba = None
+
+threshold = 0.5
+if y_proba is not None:
+    y_pred = (y_proba >= threshold).astype(int)
+else:
+    y_pred = model.predict(X_val)
+
+cm = confusion_matrix(y_val, y_pred)  # confusion_matrix API [web:421]
+print("\nConfusion matrix (VAL):\n", cm)
+print("\nClassification report (VAL):\n",
+      classification_report(y_val, y_pred, digits=4, zero_division=0))  # classification_report [web:429]
+
+results = {
+    "Model": "RandomForestClassifier",
+    "Trained_On": "train_only",
+    "Evaluated_On": "val",
+    "Threshold": threshold if y_proba is not None else "n/a",
+    "Accuracy": accuracy_score(y_val, y_pred),
+    "Precision_weighted": precision_score(y_val, y_pred, average="weighted", zero_division=0),
+    "Recall_weighted": recall_score(y_val, y_pred, average="weighted", zero_division=0),
+    "F1_weighted": f1_score(y_val, y_pred, average="weighted", zero_division=0),
+    "Precision_class1": precision_score(y_val, y_pred, pos_label=1, average="binary", zero_division=0),
+    "Recall_class1": recall_score(y_val, y_pred, pos_label=1, average="binary", zero_division=0),
+    "F1_class1": f1_score(y_val, y_pred, pos_label=1, average="binary", zero_division=0),
+    "ROC_AUC": roc_auc_score(y_val, y_proba) if y_proba is not None else None,          # ROC-AUC [web:432][web:435]
+    "PR_AUC_AP": average_precision_score(y_val, y_proba) if y_proba is not None else None,  # AP as PR-AUC [web:435]
+}
+
+print("\nVAL metrics (Random Forest):")
+for k, v in results.items():
+    print(f"{k:<18}: {v:.4f}" if isinstance(v, (int, float)) and v is not None else f"{k:<18}: {v}")
+
+# Save metrics
+pd.DataFrame([results]).to_csv(metrics_path, index=False)
+print("\nValidation metrics saved:", metrics_path)
+
+# Save per-row predictions
+out = val_df.copy()
+out["y_true"] = y_val.values
+out["y_pred"] = y_pred
+if y_proba is not None:
+    out["y_proba"] = y_proba
+out.to_csv(preds_path, index=False)
+print("Validation predictions saved:", preds_path)
+
+
+
+```
