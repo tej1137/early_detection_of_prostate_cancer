@@ -1,0 +1,6 @@
+venv/
+pi_cai_project/
+output_files/
+*.csv
+*.nii
+*.gz
