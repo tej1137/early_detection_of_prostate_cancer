@@ -48,7 +48,7 @@ y = df[LABEL_COL].copy()
 X = X.apply(pd.to_numeric, errors="coerce")
 if X.isna().any().any():
     # If this triggers, something non-numeric got into the saved csv
-    print("⚠️ NaNs found in X after numeric coercion. Dropping rows with NaNs for PCA plots.")
+    print("NaNs found in X after numeric coercion. Dropping rows with NaNs for PCA plots.")
     keep = ~X.isna().any(axis=1)
     X = X.loc[keep]
     y = y.loc[keep]
@@ -138,12 +138,11 @@ plt.title("Correlation Matrix Between Features (Train)")
 plt.tight_layout()
 plt.show()
 
-
 ```
 ```{python}
-
 from sklearn.manifold import MDS
 import umap
+
 label_map = {0: "NO", 1: "YES"}
 # -----------------------------
 # UMAP embedding (2D)

@@ -102,13 +102,11 @@ if __name__ == "__main__":
     main()
 
 #Training example command:
-# python baseline_model\preprocess_clinical.py "F:\MOD002691 - FP\pi_cai_project\picai_labels\clinical_information\split_data\train_clinical.csv" `
-#  "F:\MOD002691 - FP\pi_cai_project\picai_labels\clinical_information\preprocessed_data\preprocessed_train.csv"
+# python baseline_model\preprocess_clinical.py "F:\MOD002691 - FP\pi_cai_project\picai_labels\clinical_information\split_data\train_clinical.csv", "F:\MOD002691 - FP\pi_cai_project\picai_labels\clinical_information\preprocessed_data\preprocessed_train.csv"
 #
 #validation example command:
 # python baseline_model\preprocess_clinical.py "F:\MOD002691 - FP\pi_cai_project\picai_labels\clinical_information\split_data\val_clinical.csv", "F:\MOD002691 - FP\pi_cai_project\picai_labels\clinical_information\preprocessed_data\preprocessed_val.csv"
 #
 #test example command:
-#python baseline_model\preprocess_clinical.py "F:\MOD002691 - FP\pi_cai_project\picai_labels\clinical_information\split_data\test_clinical.csv" `
-# "F:\MOD002691 - FP\pi_cai_project\picai_labels\clinical_information\preprocessed_data\preprocessed_test.csv"
+#python baseline_model\preprocess_clinical.py "F:\MOD002691 - FP\pi_cai_project\picai_labels\clinical_information\split_data\test_clinical.csv", "F:\MOD002691 - FP\pi_cai_project\picai_labels\clinical_information\preprocessed_data\preprocessed_test.csv"
 
