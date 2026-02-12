@@ -4,3 +4,4 @@ output_files/
 *.csv
 *.nii
 *.gz
+data_info.xlsx
