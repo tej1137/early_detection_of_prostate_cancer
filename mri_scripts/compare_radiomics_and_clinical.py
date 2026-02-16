@@ -32,5 +32,5 @@ print("\n--- CONCLUSION ---")
 missing_count = len(marksheet_df) - len(radiomics_df)
 print(f"We are missing {missing_count} patients.")
 if missing_count > 500:
-    print("CRITICAL: The missing patients are almost entirely the 'NO' class (Benign).")
+    print("CRITICAL: The missing patients are almost entirely the 'NO' class (Benign ).")
     print("This proves we cannot train a classifier because the Negative class is missing.")
