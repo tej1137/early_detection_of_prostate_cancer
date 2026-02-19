@@ -7,3 +7,10 @@ matplotlib
 torch
 seaborn
 keras
+SimpleITK
+monai
+tqdm
+pyyaml
+torch
+pyradiomics
+scipy
