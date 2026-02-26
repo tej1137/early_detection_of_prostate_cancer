@@ -5,3 +5,5 @@ output_files/
 *.nii
 *.gz
 data_info.xlsx
+*.pth
+__pycache__/
