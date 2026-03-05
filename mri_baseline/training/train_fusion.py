@@ -17,7 +17,7 @@ from sklearn.metrics import roc_auc_score, classification_report, confusion_matr
 from torch.utils.data import WeightedRandomSampler, DataLoader
 from datetime import datetime
 
-from mri_baseline.models.fusion_model import FusionModel
+from mri_baseline.models.fusion_model import MultimodalFusionModel as FusionModel
 from mri_baseline.data.multimodal_dataset import PiCAIDataset, DataConfig
 
 
@@ -27,13 +27,13 @@ from mri_baseline.data.multimodal_dataset import PiCAIDataset, DataConfig
 
 class TrainConfig:
     output_dir           = Path("/workspace/data/results/fusion")
-    epochs               = 30
+    epochs               = 75
     batch_size           = 8
-    learning_rate        = 1e-4
-    weight_decay         = 1e-4
+    learning_rate        = 3e-5
+    weight_decay         = 1e-2
     lr_patience          = 5
     lr_factor            = 0.5
-    early_stop_patience  = 10
+    early_stop_patience  = 25
     use_weighted_sampler = True
     focal_loss_gamma     = 2.0
     augment_train        = True
@@ -218,14 +218,18 @@ def main():
 
     train_loader, val_loader, test_loader = build_dataloaders(train_cfg, data_cfg)
 
-    model     = FusionModel(clinical_dim=4).to(train_cfg.device)
+    model     = FusionModel(psa_in_features=4, dropout=0.5).to(train_cfg.device)
+
+    # Freeze MRI encoder — only PSA encoder + fusion head train
+    for param in model.mri_encoder.parameters():
+        param.requires_grad = False
     criterion = FocalLoss(gamma=train_cfg.focal_loss_gamma)
-    optimiser = optim.AdamW(model.parameters(),
+    optimiser = optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()),
                             lr=train_cfg.learning_rate,
                             weight_decay=train_cfg.weight_decay)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimiser, mode='max', patience=train_cfg.lr_patience,
-        factor=train_cfg.lr_factor, verbose=True)
+        factor=train_cfg.lr_factor)
 
     print(f"\n  Model params: {sum(p.numel() for p in model.parameters()):,}")
 

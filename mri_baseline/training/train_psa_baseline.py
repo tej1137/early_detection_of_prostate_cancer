@@ -30,13 +30,13 @@ from mri_baseline.data.multimodal_dataset import PiCAIDataset, DataConfig
 
 class TrainConfig:
     output_dir           = Path("/workspace/data/results/psa_baseline")
-    epochs               = 30
+    epochs               = 200
     batch_size           = 32
     learning_rate        = 1e-3
     weight_decay         = 1e-4
-    lr_patience          = 5
+    lr_patience          = 7
     lr_factor            = 0.5
-    early_stop_patience  = 10
+    early_stop_patience  = 30
     use_weighted_sampler = True
     focal_loss_gamma     = 2.0
     device               = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -216,14 +216,14 @@ def main():
 
     train_loader, val_loader, test_loader = build_dataloaders(train_cfg, data_cfg)
 
-    model     = PSAClassifier(input_dim=4).to(train_cfg.device)
+    model     = PSAClassifier(in_features=4).to(train_cfg.device)
     criterion = FocalLoss(gamma=train_cfg.focal_loss_gamma)
     optimiser = optim.AdamW(model.parameters(),
                             lr=train_cfg.learning_rate,
                             weight_decay=train_cfg.weight_decay)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimiser, mode='max', patience=train_cfg.lr_patience,
-        factor=train_cfg.lr_factor, verbose=True)
+        factor=train_cfg.lr_factor)
 
     print(f"\n  Model params: {sum(p.numel() for p in model.parameters()):,}")
 

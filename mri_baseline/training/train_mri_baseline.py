@@ -25,15 +25,15 @@ from mri_baseline.data.multimodal_dataset import PiCAIDataset, DataConfig
 # ══════════════════════════════════════════════════════════
 
 class TrainConfig:
-    output_dir           = Path("/workspace/data/results/mri_baseline")
-    epochs               = 30
+    output_dir           = Path("/workspace/data/results/mri_baseline")  # ← MISSING
+    epochs               = 100
     batch_size           = 8
-    learning_rate        = 1e-4
-    weight_decay         = 1e-4
-    lr_patience          = 5
+    learning_rate        = 3e-5       # ← lowered from 1e-4
+    weight_decay         = 1e-2       # ← strong regularisation
+    lr_patience          = 7
     lr_factor            = 0.5
-    early_stop_patience  = 10
-    use_weighted_sampler = True
+    early_stop_patience  = 20
+    use_weighted_sampler = True       # ← MISSING
     focal_loss_gamma     = 2.0
     augment_train        = True
     device               = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -216,14 +216,14 @@ def main():
 
     train_loader, val_loader, test_loader = build_dataloaders(train_cfg, data_cfg)
 
-    model     = MRIClassifier().to(train_cfg.device)
+    model = MRIClassifier(dropout=0.5).to(train_cfg.device)
     criterion = FocalLoss(gamma=train_cfg.focal_loss_gamma)
     optimiser = optim.AdamW(model.parameters(),
                             lr=train_cfg.learning_rate,
                             weight_decay=train_cfg.weight_decay)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimiser, mode='max', patience=train_cfg.lr_patience,
-        factor=train_cfg.lr_factor, verbose=True)
+        factor=train_cfg.lr_factor)
 
     print(f"\n  Model params: {sum(p.numel() for p in model.parameters()):,}")
 
