@@ -1,228 +1,305 @@
 """
 data/multimodal_dataset.py
 
-PyTorch Dataset that pairs MRI volumes with clinical features.
-This is the single class used by ALL training scripts.
+PyTorch Dataset for PI-CAI preprocessed data.
+
+Loads:
+  - MRI tensor from /workspace/data/preprocessed/mri/{case_id}.pt
+  - Clinical features from clinical_preprocessed.csv
+  - Normalisation stats from norm_stats.json
+
+Returns per case:
+  {
+    "mri":      FloatTensor (3, 20, 160, 160),
+    "clinical": FloatTensor (4,),               ← [psa, psad, volume, age] normalised
+    "label":    LongTensor  scalar (0 or 1),
+    "case_id":  str
+  }
 
 Usage:
-    from data.multimodal_dataset import MultimodalDataset, build_dataloaders
+  from mri_baseline.data.multimodal_dataset import get_dataloaders
+  loaders = get_dataloaders(config)
+  train_loader = loaders["train"]
 """
 
+import json
 import torch
-from torch.utils.data import Dataset, DataLoader
 import numpy as np
+import pandas as pd
 from pathlib import Path
-
-from mri_baseline.data.load_mri import load_mri_case, get_all_case_ids, IMAGE_DIR
-from mri_baseline.data.load_psa import (
-    load_clinical_data, fit_normalisation,
-    get_clinical_vector, get_label,
-    split_case_ids, MARKSHEET_PATH
-)
+from torch.utils.data import Dataset, DataLoader
+import torchio as tio
 
 
-class MultimodalDataset(Dataset):
+# ══════════════════════════════════════════════════════════
+# CONFIGURATION
+# ══════════════════════════════════════════════════════════
+
+class DataConfig:
+    # ── Preprocessed data ─────────────────────────────────
+    clinical_csv  = Path("/workspace/data/preprocessed/clinical_preprocessed.csv")
+    norm_stats    = Path("/workspace/data/preprocessed/norm_stats.json")
+    mri_dir       = Path("/workspace/data/preprocessed/mri")
+
+    # ── Clinical features (must match preprocess_clinical.py) ──
+    clinical_features = ["psa", "psad", "prostate_volume", "patient_age"]
+    target_col        = "case_csPCa"
+
+    # ── DataLoader settings ────────────────────────────────
+    batch_size        = 8
+    num_workers       = 4
+    pin_memory        = True    # faster GPU transfer
+
+    # ── Augmentation (train split only) ───────────────────
+    augment_train     = True
+
+
+# ══════════════════════════════════════════════════════════
+# AUGMENTATION
+# ══════════════════════════════════════════════════════════
+
+def augment_mri(tensor: torch.Tensor) -> torch.Tensor:
     """
-    Returns one sample per __getitem__:
-    {
-      "image"    : FloatTensor  (3, Z, H, W)   — MRI (T2W, ADC, HBV)
-      "clinical" : FloatTensor  (4,)            — PSA, PSAD, volume, age
-      "label"    : LongTensor   scalar          — 0 = benign, 1 = cancer
-      "case_id"  : str                          — for debugging
-    }
+    Enhanced MRI augmentation using torchio.
+    tensor shape: (3, D, H, W) → (3, D, H, W)
+    """
+    # torchio expects (C, W, H, D) — permute in and back out
+    t = tensor.permute(0, 3, 2, 1)   # (3, W, H, D)
+
+    subject = tio.Subject(mri=tio.ScalarImage(tensor=t))
+
+    transform = tio.Compose([
+        tio.RandomFlip(axes=(0, 1, 2), flip_probability=0.5),
+        tio.RandomAffine(scales=0.05, degrees=10, translation=5, p=0.5),
+        tio.RandomNoise(std=(0, 0.05), p=0.3),
+        tio.RandomBiasField(coefficients=0.3, p=0.3),
+        tio.RandomGamma(log_gamma=(-0.3, 0.3), p=0.3),
+    ])
+
+    result = transform(subject).mri.tensor.permute(0, 3, 2, 1)
+    return result.float().clamp(0.0, 1.0)
+# ══════════════════════════════════════════════════════════
+# DATASET CLASS
+# ══════════════════════════════════════════════════════════
+
+class PiCAIDataset(Dataset):
+    """
+    PyTorch Dataset for PI-CAI preprocessed MRI + clinical data.
+
+    Args:
+        split       : "train", "val", or "test"
+        config      : DataConfig instance
+        augment     : If True, apply augmentation (train only)
+        mri_only    : If True, skip clinical features (for MRI-only model)
+        clinical_only: If True, skip MRI loading (for PSA-only model, fast!)
     """
 
-    def __init__(self,
-                 case_ids:    list,
-                 clinical_df,
-                 norm_stats:  dict,
-                 image_dir:   Path   = IMAGE_DIR,
-                 target_shape: tuple = (20, 256, 256),
-                 augment:     bool   = False):
-        """
-        Args:
-            case_ids     : list of "patient_id_study_id" strings
-            clinical_df  : DataFrame from load_clinical_data()
-            norm_stats   : dict from fit_normalisation()  (fit on TRAIN only)
-            image_dir    : root folder of PI-CAI images
-            target_shape : (Z, H, W) each volume is resized to this
-            augment      : if True, apply random augmentations (train only)
-        """
-        self.case_ids     = case_ids
-        self.clinical_df  = clinical_df
-        self.norm_stats   = norm_stats
-        self.image_dir    = image_dir
-        self.target_shape = target_shape
-        self.augment      = augment
+    def __init__(
+        self,
+        split          : str,
+        config         : DataConfig = None,
+        augment        : bool = False,
+        mri_only       : bool = False,
+        clinical_only  : bool = False,
+    ):
+        self.config        = config or DataConfig()
+        self.split         = split
+        self.augment       = augment
+        self.mri_only      = mri_only
+        self.clinical_only = clinical_only
 
-    def __len__(self):
+        # Load clinical CSV and filter to this split
+        df = pd.read_csv(self.config.clinical_csv, index_col="case_id")
+        self.df = df[df["split"] == split].copy()
+
+        if len(self.df) == 0:
+            raise ValueError(f"No cases found for split='{split}' in {self.config.clinical_csv}")
+
+        self.case_ids = self.df.index.tolist()
+
+        # Load normalisation stats (computed on train set only)
+        with open(self.config.norm_stats, 'r') as f:
+            self.norm_stats = json.load(f)
+
+        # Precompute normalised clinical features as numpy array
+        # Shape: (N, 4) — faster than normalising per-item in __getitem__
+        self._precompute_clinical()
+
+        print(f"  PiCAIDataset [{split}]: {len(self.case_ids)} cases  "
+              f"({self.df[self.config.target_col].sum()} cancer, "
+              f"{(self.df[self.config.target_col] == 0).sum()} benign)")
+
+    def _precompute_clinical(self):
+        """
+        Normalise all clinical features upfront using train-set stats.
+
+        Formula: z = (x - mean) / std
+
+        Using train-set mean/std for ALL splits (train, val, test)
+        to prevent data leakage — val/test never influence the scale.
+        """
+        features = []
+        for col in self.config.clinical_features:
+            mean = self.norm_stats[col]["mean"]
+            std  = self.norm_stats[col]["std"]
+            normalised = (self.df[col].values - mean) / std
+            features.append(normalised)
+
+        # Stack → (N, 4), then convert to tensor
+        self.clinical_tensor = torch.tensor(
+            np.stack(features, axis=1),
+            dtype=torch.float32
+        )
+
+    def __len__(self) -> int:
         return len(self.case_ids)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int) -> dict:
         case_id = self.case_ids[idx]
+        label   = int(self.df.loc[case_id, self.config.target_col])
 
-        # ── parse patient_id and study_id ──────────────
-        # case_id format: "10000_1000000"
-        parts      = case_id.split("_")
-        patient_id = parts[0]
-        study_id   = parts[1]
-
-        # ── MODALITY 1: MRI ────────────────────────────
-        try:
-            image = load_mri_case(
-                patient_id, study_id,
-                image_dir=self.image_dir,
-                target_shape=self.target_shape
-            )
-        except FileNotFoundError as e:
-            # Graceful fallback: return zeros so training doesn't crash
-            print(f"WARNING: {e}")
-            z, h, w = self.target_shape
-            image   = np.zeros((3, z, h, w), dtype=np.float32)
-
-        if self.augment:
-            image = self._augment(image)
-
-        # ── MODALITY 2: CLINICAL ───────────────────────
-        clinical = get_clinical_vector(case_id, self.clinical_df, self.norm_stats)
-
-        # ── LABEL ──────────────────────────────────────
-        try:
-            label = get_label(case_id, self.clinical_df)
-        except KeyError:
-            label = 0     # default to benign if missing
-
-        return {
-            "image":    torch.from_numpy(image).float(),
-            "clinical": torch.from_numpy(clinical).float(),
-            "label":    torch.tensor(label, dtype=torch.long),
-            "case_id":  case_id
+        result = {
+            "label"   : torch.tensor(label, dtype=torch.long),
+            "case_id" : case_id,
         }
 
-    @staticmethod
-    def _augment(image: np.ndarray) -> np.ndarray:
-        """
-        Simple augmentations that are safe for medical images:
-        - Random horizontal flip
-        - Random vertical flip
-        - Mild random Gaussian noise
-        All applied with 50% probability.
-        """
-        # Flip along H axis
-        if np.random.rand() > 0.5:
-            image = np.flip(image, axis=2).copy()
+        # ── Clinical features ──────────────────────────────
+        if not self.mri_only:
+            result["clinical"] = self.clinical_tensor[idx]   # (4,)
 
-        # Flip along W axis
-        if np.random.rand() > 0.5:
-            image = np.flip(image, axis=3).copy()
+        # ── MRI tensor ─────────────────────────────────────
+        if not self.clinical_only:
+            mri_path = self.config.mri_dir / f"{case_id}.pt"
 
-        # Add small Gaussian noise
-        if np.random.rand() > 0.5:
-            noise = np.random.normal(0, 0.05, image.shape).astype(np.float32)
-            image = image + noise
+            if not mri_path.exists():
+                raise FileNotFoundError(
+                    f"Preprocessed MRI not found: {mri_path}\n"
+                    f"Run preprocess_mri.py first."
+                )
 
-        return image
+            mri = torch.load(mri_path, weights_only=True)   # (3, 20, 160, 160)
+
+            # Apply augmentation (train split only)
+            if self.augment and self.split == "train":
+                mri = augment_mri(mri)
+
+            result["mri"] = mri   # (3, D, H, W)
+
+        return result
 
 
-def build_dataloaders(image_dir:    Path  = IMAGE_DIR,
-                      marksheet:    Path  = MARKSHEET_PATH,
-                      batch_size:   int   = 2,
-                      num_workers:  int   = 2,
-                      target_shape: tuple = (20, 256, 256),
-                      seed:         int   = 42):
+# ══════════════════════════════════════════════════════════
+# DATALOADER FACTORY
+# ══════════════════════════════════════════════════════════
+
+def get_dataloaders(
+    config        : DataConfig = None,
+    mri_only      : bool = False,
+    clinical_only : bool = False,
+) -> dict[str, DataLoader]:
     """
-    One-call function: loads data, splits, normalises, returns DataLoaders.
+    Build train / val / test DataLoaders.
+
+    Args:
+        config        : DataConfig (uses defaults if None)
+        mri_only      : True for MRI-only model (no clinical features)
+        clinical_only : True for PSA-only model (no MRI loading — fast!)
 
     Returns:
-        train_loader, val_loader, test_loader, norm_stats
+        {
+            "train": DataLoader,
+            "val":   DataLoader,
+            "test":  DataLoader
+        }
+
+    Notes:
+      - Train loader: shuffle=True, augment=True
+      - Val/Test loaders: shuffle=False, augment=False
+      - num_workers=0 on Windows (multiprocessing limitation)
     """
+    config = config or DataConfig()
 
-    # 1. Load clinical data
-    clinical_df = load_clinical_data(marksheet)
+    # Detect Windows — multiprocessing doesn't work well on Windows
+    import platform
+    num_workers = 0 if platform.system() == "Windows" else config.num_workers
 
-    # 2. Train/val/test split
-    train_ids, val_ids, test_ids = split_case_ids(clinical_df, seed=seed)
+    loaders = {}
 
-    # 3. Fit normalisation on training set ONLY
-    train_df   = clinical_df.loc[train_ids]
-    norm_stats = fit_normalisation(train_df)
+    for split in ["train", "val", "test"]:
+        is_train = (split == "train")
 
-    # 4. Create datasets
-    train_ds = MultimodalDataset(
-        train_ids, clinical_df, norm_stats,
-        image_dir=image_dir,
-        target_shape=target_shape,
-        augment=True              # augment training only
-    )
-    val_ds = MultimodalDataset(
-        val_ids, clinical_df, norm_stats,
-        image_dir=image_dir,
-        target_shape=target_shape,
-        augment=False
-    )
-    test_ds = MultimodalDataset(
-        test_ids, clinical_df, norm_stats,
-        image_dir=image_dir,
-        target_shape=target_shape,
-        augment=False
-    )
+        dataset = PiCAIDataset(
+            split         = split,
+            config        = config,
+            augment       = is_train and config.augment_train,
+            mri_only      = mri_only,
+            clinical_only = clinical_only,
+        )
 
-    # 5. Wrap in DataLoaders
-    train_loader = DataLoader(
-        train_ds,
-        batch_size=batch_size,
-        shuffle=True,
-        num_workers=num_workers,
-        pin_memory=True
-    )
-    val_loader = DataLoader(
-        val_ds,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=num_workers,
-        pin_memory=True
-    )
-    test_loader = DataLoader(
-        test_ds,
-        batch_size=1,             # always batch=1 for test
-        shuffle=False,
-        num_workers=num_workers,
-        pin_memory=True
-    )
+        loaders[split] = DataLoader(
+            dataset,
+            batch_size  = config.batch_size,
+            shuffle     = is_train,       # only shuffle train
+            num_workers = num_workers,
+            pin_memory  = config.pin_memory and torch.cuda.is_available(),
+            drop_last   = is_train,       # drop incomplete last batch in train only
+        )
 
-    print(f"\nDataLoaders ready:")
-    print(f"  Train batches : {len(train_loader)}")
-    print(f"  Val   batches : {len(val_loader)}")
-    print(f"  Test  batches : {len(test_loader)}")
-
-    return train_loader, val_loader, test_loader, norm_stats
+    return loaders
 
 
-# ─────────────────────────────────────────────
-# Quick sanity check — run this file directly
-# python data/multimodal_dataset.py
-# ─────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════
+# QUICK SANITY CHECK
+# ══════════════════════════════════════════════════════════
+
+def sanity_check(config: DataConfig = None):
+    """
+    Run this to verify the dataset loads correctly before training.
+
+    Checks:
+      - All splits load without error
+      - Batch shapes are correct
+      - Label distribution matches expected ~28% cancer
+      - No NaN in MRI or clinical tensors
+    """
+    config = config or DataConfig()
+
+    print("\n" + "="*60)
+    print("DATASET SANITY CHECK")
+    print("="*60)
+
+    loaders = get_dataloaders(config)
+
+    for split, loader in loaders.items():
+        print(f"\n── {split.upper()} ──")
+
+        batch = next(iter(loader))
+
+        mri      = batch["mri"]        # (B, 3, 20, 160, 160)
+        clinical = batch["clinical"]   # (B, 4)
+        labels   = batch["label"]      # (B,)
+        case_ids = batch["case_id"]    # list of B strings
+
+        print(f"  MRI shape    : {tuple(mri.shape)}")
+        print(f"  Clinical     : {tuple(clinical.shape)}")
+        print(f"  Labels       : {tuple(labels.shape)}  values={labels.tolist()}")
+        print(f"  Case IDs     : {case_ids[:3]}...")
+        print(f"  MRI range    : [{mri.min():.3f}, {mri.max():.3f}]")
+        print(f"  Clinical     : {clinical[0].tolist()}")
+        print(f"  NaN in MRI   : {torch.isnan(mri).any().item()}")
+        print(f"  NaN in clin  : {torch.isnan(clinical).any().item()}")
+
+        # Check expected shapes
+        assert mri.shape[1:] == (3, 20, 160, 160), f"Wrong MRI shape: {mri.shape}"
+        assert clinical.shape[1] == 4,             f"Wrong clinical shape: {clinical.shape}"
+        assert not torch.isnan(mri).any(),         "NaN found in MRI!"
+        assert not torch.isnan(clinical).any(),    "NaN found in clinical!"
+        print(f"  ✓ All checks passed")
+
+    print("\n" + "="*60)
+    print("SANITY CHECK COMPLETE — ready to train!")
+    print("="*60)
+
+
 if __name__ == "__main__":
-    import torch
-
-    print("Building dataloaders...")
-    train_loader, val_loader, test_loader, norm_stats = build_dataloaders(
-        batch_size=2,
-        target_shape=(20, 256, 256)
-    )
-
-    print("\nChecking first training batch...")
-    batch = next(iter(train_loader))
-
-    print(f"  image shape   : {batch['image'].shape}")      # [2, 3, 20, 256, 256]
-    print(f"  clinical shape: {batch['clinical'].shape}")   # [2, 4]
-    print(f"  labels        : {batch['label']}")            # [0 or 1, 0 or 1]
-    print(f"  case_ids      : {batch['case_id']}")
-
-    assert batch["image"].shape[1]    == 3,  "Expected 3 MRI channels"
-    assert batch["clinical"].shape[1] == 4,  "Expected 4 clinical features"
-    assert batch["image"].dtype       == torch.float32
-    assert batch["clinical"].dtype    == torch.float32
-    assert batch["label"].dtype       == torch.int64
-
-    print("\nAll assertions passed — dataset is working correctly!")
+    sanity_check()

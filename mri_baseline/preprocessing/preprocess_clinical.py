@@ -52,7 +52,12 @@ class Config:
     # These patients have no MRI files on disk at all.
     # We exclude them here so the same clean CSV works for
     # both PSA-only and MRI+PSA training.
-    known_missing_mri = ["10121_1000121", "10089_1000089"]
+    known_missing_mri = [
+    "10121_1000121",   # original
+    "10089_1000089",   # original
+    "10104_1000104",   # missing t2w + hbv  ← ADD
+    "10403_1000409",   # patient dir not found ← ADD
+]
     # Note: 10403 has no study_id known — handled by MRI audit
 
     # ── Train/val/test split ratios ─────────────────────────

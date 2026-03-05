@@ -39,10 +39,12 @@ from tqdm import tqdm
 class Config:
     # ── Input ──────────────────────────────────────────────
     clinical_csv  = Path("/workspace/data/preprocessed/clinical_preprocessed.csv")
-    mri_root      = Path("/workspace/data/picai_public_images_fold0")
-    # MRI files are stored as:
-    # {mri_root}/{patient_id}/{study_id}/{patient_id}_{study_id}_{sequence}.mha
-    # e.g. /workspace/data/.../10000/1000000/10000_1000000_t2w.mha
+    mri_root      = Path("/workspace/data/images")   # ← parent of all folds
+    mri_folds     = ["picai_public_images_fold0",
+                     "picai_public_images_fold1",
+                     "picai_public_images_fold2",
+                     "picai_public_images_fold3",
+                     "picai_public_images_fold4"]    # ← search all folds
 
     # ── Output ─────────────────────────────────────────────
     output_dir    = Path("/workspace/data/preprocessed/mri")
@@ -84,33 +86,36 @@ class Config:
 # STEP 1 — AUDIT: FIND MISSING MRI FILES
 # ══════════════════════════════════════════════════════════
 
+def find_case_dir(case_id: str, config: Config):
+    """
+    Search all fold directories for a case.
+    Structure: {mri_root}/{fold}/{patient_id}/{case_id}_{seq}.mha
+    Returns the fold directory Path if found, else None.
+    """
+    patient_id = case_id.split("_")[0]
+    for fold in config.mri_folds:
+        candidate = config.mri_root / fold / patient_id
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def audit_mri_files(config: Config, case_ids: list) -> tuple[list, list]:
-    """
-    Scan disk for all expected .mha files before processing.
-
-    For each case_id, checks that ALL 3 sequence files exist:
-      t2w → {patient_id}_{study_id}_t2w.mha
-      adc → {patient_id}_{study_id}_adc.mha
-      hbv → {patient_id}_{study_id}_hbv.mha
-
-    Returns:
-      valid_cases   — case_ids where all 3 files exist
-      missing_cases — case_ids where at least one file is missing
-
-    The missing_cases list should be added to Config.known_missing_mri
-    in preprocess_clinical.py, then clinical preprocessing re-run.
-    """
     print("\n" + "═"*60)
     print("STEP 1 — AUDITING MRI FILES ON DISK")
     print("═"*60)
 
-    valid_cases   = []
-    missing_cases = []
-    missing_detail = {}  # case_id → which sequences are missing
+    valid_cases    = []
+    missing_cases  = []
+    missing_detail = {}
 
     for case_id in tqdm(case_ids, desc="  Auditing"):
-        patient_id, study_id = case_id.split("_")
-        case_dir = config.mri_root / patient_id / study_id
+        case_dir = find_case_dir(case_id, config)
+
+        if case_dir is None:
+            missing_cases.append(case_id)
+            missing_detail[case_id] = ["patient_dir_not_found"]
+            continue
 
         missing_seqs = []
         for seq in config.sequences:
@@ -133,16 +138,13 @@ def audit_mri_files(config: Config, case_ids: list) -> tuple[list, list]:
         for cid, seqs in missing_detail.items():
             print(f"    {cid}  missing: {seqs}")
 
-        # Write missing cases to log file
         with open(config.missing_log, 'w') as f:
-            f.write("# Cases missing MRI files — add to preprocess_clinical.py Config.known_missing_mri\n")
+            f.write("# Cases missing MRI files\n")
             for cid in missing_cases:
                 f.write(f"{cid}  # missing: {missing_detail[cid]}\n")
         print(f"\n  ✓ Missing cases logged to: {config.missing_log}")
-        print(f"  → Add these to Config.known_missing_mri in preprocess_clinical.py")
-        print(f"  → Re-run preprocess_clinical.py before training")
 
-    return valid_cases, missing_cases
+    return valid_cases, missing_cases   # ← THIS LINE WAS MISSING
 
 
 # ══════════════════════════════════════════════════════════
@@ -319,60 +321,26 @@ def normalise_intensity(volume: np.ndarray, clip_low: float, clip_high: float) -
 # ══════════════════════════════════════════════════════════
 
 def process_case(case_id: str, config: Config) -> bool:
-    """
-    Full preprocessing pipeline for a single case.
-
-    Loads T2W + ADC + HBV → resamples → crops/pads → normalises
-    → stacks into (3, D, H, W) → saves as .pt tensor
-
-    Returns:
-      True  if successful
-      False if any error (file not found, corrupt file, etc.)
-
-    Output tensor shape: (3, D, H, W) = (3, 20, 160, 160)
-      Channel 0: T2W
-      Channel 1: ADC
-      Channel 2: HBV
-    """
     output_path = config.output_dir / f"{case_id}.pt"
-
-    # Skip if already processed
     if config.skip_existing and output_path.exists():
         return True
 
-    patient_id, study_id = case_id.split("_")
-    case_dir = config.mri_root / patient_id / study_id
+    case_dir = find_case_dir(case_id, config)   # ← use find_case_dir
+    if case_dir is None:
+        raise FileNotFoundError(f"No MRI directory found for {case_id}")
 
     channels = []
-
     for seq in config.sequences:
         fpath = case_dir / f"{case_id}_{seq}.mha"
-
-        # Load
         image = load_mha(fpath)
-
-        # Resample to uniform spacing
         image = resample_volume(image, config.target_spacing)
-
-        # Convert to numpy — SimpleITK is (x,y,z), numpy needs (z,y,x) = (D,H,W)
-        volume = sitk.GetArrayFromImage(image)   # returns (z, y, x)
-
-        # Crop/pad to fixed size
+        volume = sitk.GetArrayFromImage(image)
         volume = crop_or_pad(volume, config.target_size)
-
-        # Normalise intensity [0, 1]
         volume = normalise_intensity(volume, config.clip_percentile_low, config.clip_percentile_high)
-
         channels.append(volume)
 
-    # Stack → (3, D, H, W)
     tensor = torch.tensor(np.stack(channels, axis=0), dtype=torch.float32)
-
-    # Sanity check shape
-    expected = (3,) + config.target_size
-    assert tensor.shape == expected, f"Shape mismatch: {tensor.shape} != {expected}"
-
-    # Save
+    assert tensor.shape == (3,) + config.target_size
     torch.save(tensor, output_path)
     return True
 
