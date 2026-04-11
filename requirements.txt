@@ -40,3 +40,4 @@ opencv-python-headless
 
 # ── Experiment Tracking (optional) ────────────────────
 # wandb            # uncomment if you want Weights & Biases logging
+shap 
