@@ -7,3 +7,4 @@ output_files/
 data_info.xlsx
 *.pth
 __pycache__/
+checkpoints/

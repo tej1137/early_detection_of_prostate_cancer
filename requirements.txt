@@ -5,6 +5,7 @@ scipy
 scikit-learn
 matplotlib
 seaborn
+torchio
 
 # ── Deep Learning ──────────────────────────────────────
 # NOTE: Do NOT install torch via pip install -r requirements.txt on RunPod
