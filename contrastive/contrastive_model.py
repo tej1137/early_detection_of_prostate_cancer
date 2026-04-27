@@ -23,9 +23,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 from mri_baseline.models.mri_encoder import MRIEncoder
 
 
-# ══════════════════════════════════════════════════════════
-# PROJECTION HEAD
-# ══════════════════════════════════════════════════════════
+#Projection head
 
 class ProjectionHead(nn.Module):
     """
@@ -48,9 +46,7 @@ class ProjectionHead(nn.Module):
         return F.normalize(self.net(x), dim=1)   # L2 normalise → unit sphere
 
 
-# ══════════════════════════════════════════════════════════
-# SIMCLR MODEL
-# ══════════════════════════════════════════════════════════
+#SimCLR Model
 
 class SimCLRModel(nn.Module):
     """
@@ -96,9 +92,7 @@ class SimCLRModel(nn.Module):
         return self.encoder.state_dict()
 
 
-# ══════════════════════════════════════════════════════════
-# NTXENT LOSS (SimCLR Loss)
-# ══════════════════════════════════════════════════════════
+#NTXentLoss
 
 class NTXentLoss(nn.Module):
     """

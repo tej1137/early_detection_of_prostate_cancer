@@ -1,39 +1,5 @@
 """
-bimri/training/train_bimri.py
-
 Training script for bi-parametric MRI (T2W + ADC only) baseline.
-
-Research question:
-    Can biMRI (T2W + ADC) match mpMRI (T2W + ADC + HBV) performance?
-    If yes → simpler acquisition protocol may suffice clinically.
-
-Comparison target:
-    mpMRI baseline (train_mri_baseline.py) → Test AUROC: 0.71
-    biMRI baseline (this script)           → TBD
-
-Architecture:
-    BiMRIClassifier:
-        BiMRIEncoder (in_channels=2) → (B, 512)
-        Classification head          → (B, 2)
-
-Everything else is IDENTICAL to train_mri_baseline.py:
-    - Same focal loss (gamma=2.0)
-    - Same weighted random sampler
-    - Same learning rate (3e-5)
-    - Same weight decay (1e-2)
-    - Same early stopping (patience=20)
-    - Same AUROC checkpointing
-
-This ensures any AUROC difference is purely due to
-losing the HBV channel, not any training differences.
-
-Output:
-    /workspace/data/results/bimri/run_001/
-        best_bimri_model.pt
-        bimri_training_curves.png
-        bimri_confusion_matrix.png
-        bimri_results.json
-        params.json
 
 Run:
     python -m bimri.training.train_bimri
@@ -57,10 +23,6 @@ from bimri.data.bimri_dataset     import get_bimri_loaders
 from bimri.models.bimri_encoder   import BiMRIClassifier
 
 
-# ══════════════════════════════════════════════════════════
-# CONFIGURATION
-# ══════════════════════════════════════════════════════════
-
 class TrainConfig:
     """
     Identical to TrainConfig in train_mri_baseline.py.
@@ -83,9 +45,7 @@ class TrainConfig:
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
 
-# ══════════════════════════════════════════════════════════
-# EXPERIMENT TRACKING
-# ══════════════════════════════════════════════════════════
+#TRACKINNG
 
 def get_run_dir(base_dir: Path) -> Path:
     existing = sorted([
@@ -120,10 +80,6 @@ def save_params(run_dir: Path, cfg: TrainConfig):
     print(f"  ✓ Params saved → {run_dir / 'params.json'}")
 
 
-# ══════════════════════════════════════════════════════════
-# FOCAL LOSS  (identical to all other training scripts)
-# ══════════════════════════════════════════════════════════
-
 class FocalLoss(nn.Module):
     def __init__(self, gamma: float = 2.0):
         super().__init__()
@@ -135,10 +91,7 @@ class FocalLoss(nn.Module):
         pt      = torch.exp(-ce_loss)
         return ((1 - pt) ** self.gamma * ce_loss).mean()
 
-
-# ══════════════════════════════════════════════════════════
-# TRAIN / EVALUATE
-# ══════════════════════════════════════════════════════════
+#Train and evaluate functions
 
 def train_epoch(model, loader, optimiser, criterion, device):
     model.train()
@@ -185,9 +138,7 @@ def evaluate(model, loader, criterion, device):
     return total_loss / len(loader), auroc, all_labels, all_probs
 
 
-# ══════════════════════════════════════════════════════════
-# PLOTS
-# ══════════════════════════════════════════════════════════
+#Plot cheyuu
 
 def save_training_curves(history: dict, run_dir: Path):
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
@@ -219,9 +170,7 @@ def save_confusion_matrix(labels, preds, run_dir: Path):
     plt.close()
 
 
-# ══════════════════════════════════════════════════════════
-# MAIN
-# ══════════════════════════════════════════════════════════
+#Main training loop
 
 def main():
     cfg = TrainConfig()
@@ -241,7 +190,7 @@ def main():
 
     save_params(run_dir, cfg)
 
-    # ── Data ───────────────────────────────────────────────
+    #Data
     loaders    = get_bimri_loaders(
         batch_size  = cfg.batch_size,
         num_workers = 4,
@@ -250,7 +199,7 @@ def main():
     val_loader   = loaders["val"]
     test_loader  = loaders["test"]
 
-    # ── Model ──────────────────────────────────────────────
+    #Model
     model     = BiMRIClassifier(in_channels=2, dropout=0.5).to(cfg.device)
     criterion = FocalLoss(gamma=cfg.focal_loss_gamma)
     optimiser = optim.AdamW(
@@ -268,7 +217,7 @@ def main():
     print(f"\n  Model params: {total_params:,}")
     print(f"  Input shape : (B, 2, 20, 160, 160)  ← 2 channels\n")
 
-    # ── Training loop ──────────────────────────────────────
+    #Training loop
     history    = {"train_loss": [], "val_loss": [],
                   "train_auroc": [], "val_auroc": []}
     best_auroc = 0.0
@@ -311,7 +260,7 @@ def main():
                 print(f"\n  Early stopping at epoch {epoch}")
                 break
 
-    # ── Test evaluation ────────────────────────────────────
+    #Test evaluation
     print("\n" + "=" * 60)
     print("TEST EVALUATION  (biMRI — T2W + ADC only)")
     print("=" * 60)
@@ -330,7 +279,7 @@ def main():
         test_labels, test_preds, target_names=["Benign", "Cancer"]
     ))
 
-    # ── Save outputs ───────────────────────────────────────
+    #Save outputs
     save_training_curves(history, run_dir)
     save_confusion_matrix(test_labels, test_preds, run_dir)
 

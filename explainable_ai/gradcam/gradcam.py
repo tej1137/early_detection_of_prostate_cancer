@@ -17,15 +17,6 @@ What this script does:
         f. Computes clinical feature attributions (Grad × Input)
     6. Saves summary report with all centroid distances
 
-Output structure:
-    gradcam_outputs/
-    ├── case_10021_1000021/
-    │   ├── t2w_gradcam_slices.png        ← T2W + heatmap overlay
-    │   ├── annotation_comparison.png     ← T2W + heatmap + lesion mask
-    │   ├── gradcam_heatmap.nii.gz        ← open in ITK-SNAP
-    │   ├── clinical_attribution.png      ← PSA/PSAD/volume/age importance
-    │   └── case_summary.json            ← centroid distance + prediction
-    └── summary_report.json              ← all 5 cases + mean centroid distance
 
 ITK-SNAP usage for each case:
     1. File → Open Main Image → ../images/.../case_t2w.mha
@@ -51,7 +42,7 @@ import pandas as pd
 from pathlib import Path
 from scipy import ndimage
 
-# ── Add project root to path ───────────────────────────────
+# Add project root to path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
@@ -59,19 +50,15 @@ from mri_baseline.models.mri_encoder import MRIEncoder
 from mri_baseline.models.psa_encoder import PSAEncoder
 
 
-# ══════════════════════════════════════════════════════════
-# CONFIGURATION — update paths if needed
-# ══════════════════════════════════════════════════════════
-
 CFG = {
-    # ── Model ──────────────────────────────────────────────
+    #  Model 
     "model_ckpt"    : ROOT / "checkpoints" / "crossmodal" / "fusion_crossmodal_unfrozen.pt",
 
-    # ── Clinical data ──────────────────────────────────────
+    # Clinical data 
     "clinical_csv"  : ROOT / "pi_cai_project" / "picai_labels" / "clinical_information" / "preprocessed" / "clinical_preprocessed.csv",
     "norm_stats"    : ROOT / "pi_cai_project" / "picai_labels" / "clinical_information" / "preprocessed" / "norm_stats.json",
 
-    # ── MRI images ─────────────────────────────────────────
+    # MRI images
     "image_root"    : ROOT / "pi_cai_project" / "images",
     "mri_folds"     : [
         "picai_public_images_fold0",
@@ -81,35 +68,33 @@ CFG = {
         "picai_public_images_fold4",
     ],
 
-    # ── Lesion annotations ─────────────────────────────────
+    # Lesion annotations─
     "annotation_dir": ROOT / "pi_cai_project" / "picai_labels" / "csPCa_lesion_delineations" / "human_expert" / "resampled",
 
-    # ── Output ─────────────────────────────────────────────
+    # Output─
     "output_dir"    : ROOT / "gradcam_outputs",
 
-    # ── Model dims (must match training) ──────────────────
+    # Model dims (must match training)
     "mri_dim"       : 512,
     "clinical_dim"  : 128,
     "fusion_dim"    : 640,    # 512 + 128
 
-    # ── Preprocessing ──────────────────────────────────────
+    # Preprocessing
     "target_size"   : (20, 160, 160),
     "sequences"     : ["t2w", "adc", "hbv"],
 
-    # ── Selection ──────────────────────────────────────────
+    # Selection
     "n_cases"       : 5,      # number of true positive cases to explain
     "min_prob"      : 0.65,   # minimum cancer probability to select
 
-    # ── Grad-CAM ───────────────────────────────────────────
+    # Grad-CAM─
     "target_layer_idx": 3,    # conv_blocks[3] — last conv block
 
     "device"        : "cuda" if torch.cuda.is_available() else "cpu",
 }
 
 
-# ══════════════════════════════════════════════════════════
 # CROSSMODAL FUSION MODEL
-# ══════════════════════════════════════════════════════════
 
 class CrossModalFusionModel(torch.nn.Module):
     """
@@ -143,9 +128,9 @@ class CrossModalFusionModel(torch.nn.Module):
         return self.classifier(fused)
 
 
-# ══════════════════════════════════════════════════════════
+
 # GRAD-CAM 3D
-# ══════════════════════════════════════════════════════════
+
 
 class GradCAM3D:
     """
@@ -193,9 +178,9 @@ class GradCAM3D:
         self.bwd_handle.remove()
 
 
-# ══════════════════════════════════════════════════════════
+
 # MRI PREPROCESSING
-# ══════════════════════════════════════════════════════════
+
 
 def find_patient_folder(patient_id: str) -> Path:
     """Search all fold directories for patient folder."""
@@ -280,9 +265,7 @@ def preprocess_clinical(case_id: str, df: pd.DataFrame, stats: dict) -> torch.Te
     return torch.tensor(vals, dtype=torch.float32).unsqueeze(0)
 
 
-# ══════════════════════════════════════════════════════════
-# CENTROID DISTANCE
-# ══════════════════════════════════════════════════════════
+# CENTROID DISTANCE CALC
 
 def load_annotation(case_id: str):
     """
@@ -295,7 +278,7 @@ def load_annotation(case_id: str):
     """
     ann_path = CFG["annotation_dir"] / f"{case_id}.nii.gz"
     if not ann_path.exists():
-        print(f"  ⚠ No annotation found for {case_id}")
+        print(f"  No annotation found for {case_id}")
         return None, None, False
 
     mask_sitk = sitk.ReadImage(str(ann_path))
@@ -410,9 +393,9 @@ def euclidean_distance_mm(p1: np.ndarray, p2: np.ndarray) -> float:
     return float(np.sqrt(np.sum((p1 - p2) ** 2)))
 
 
-# ══════════════════════════════════════════════════════════
+
 # VISUALISATION
-# ══════════════════════════════════════════════════════════
+
 
 def overlay_heatmap(gray: np.ndarray, heat: np.ndarray, alpha: float = 0.45):
     """Overlay Grad-CAM heatmap on grayscale MRI slice."""
@@ -530,7 +513,7 @@ def save_gradcam_nifti(cam_vol: np.ndarray, t2w_sitk, out_dir: Path):
 
     out_path = out_dir / "gradcam_heatmap.nii.gz"
     sitk.WriteImage(cam_sitk, str(out_path))
-    print(f"  ✓ Saved gradcam_heatmap.nii.gz → open in ITK-SNAP")
+    print(f"Saved gradcam_heatmap.nii.gz → open in ITK-SNAP")
     return out_path
 
 
@@ -561,14 +544,14 @@ def save_clinical_attribution(clinical_grad, clinical_inp, raw_vals, out_dir: Pa
     fig.tight_layout()
     fig.savefig(out_dir / "clinical_attribution.png", dpi=200, bbox_inches="tight")
     plt.close(fig)
-    print(f"  ✓ Saved clinical_attribution.png")
+    print(f"  Saved clinical_attribution.png")
 
     return {n: float(v) for n, v in zip(names, attr)}
 
 
-# ══════════════════════════════════════════════════════════
+
 # MAIN
-# ══════════════════════════════════════════════════════════
+
 
 def main():
     print("=" * 60)
@@ -580,7 +563,7 @@ def main():
 
     CFG["output_dir"].mkdir(parents=True, exist_ok=True)
 
-    # ── Load model ─────────────────────────────────────────
+    # Load model─
     print("[1] Loading CrossModal fusion model...")
     model = CrossModalFusionModel()
 
@@ -594,18 +577,18 @@ def main():
 
     model = model.to(CFG["device"])
     model.eval()
-    print(f"  ✓ Model loaded")
+    print(f" Model loaded")
 
-    # ── Load clinical data ─────────────────────────────────
+    # Load clinical data─
     print("\n[2] Loading clinical data...")
     df    = pd.read_csv(CFG["clinical_csv"], index_col="case_id")
     with open(CFG["norm_stats"], "r") as f:
         stats = json.load(f)
 
     test_df = df[df["split"] == "test"].copy()
-    print(f"  ✓ {len(test_df)} test cases loaded")
+    print(f" {len(test_df)} test cases loaded")
 
-    # ── Run inference on all test cases ───────────────────
+    # Run inference on all test cases─
     print("\n[3] Running inference on test set to find true positives...")
 
     results = []
@@ -650,11 +633,11 @@ def main():
         print("  ERROR: No true positives found. Check model checkpoint and data paths.")
         return
 
-    # ── Hook Grad-CAM to last conv block ──────────────────
+    # Hook Grad-CAM to last conv block
     target_layer = model.mri_encoder.conv_blocks[CFG["target_layer_idx"]].block[3]
     cam_helper   = GradCAM3D(model, target_layer)
 
-    # ── Process each selected case ─────────────────────────
+    # Process each selected case─
     print("\n[4] Generating Grad-CAM for selected cases...")
     all_summaries = []
 
@@ -662,7 +645,7 @@ def main():
         case_id = case_info["case_id"]
         prob    = case_info["prob"]
 
-        print(f"\n  ── Case: {case_id}  P(cancer)={prob:.3f} ──")
+        print(f"\n  Case: {case_id}  P(cancer)={prob:.3f}")
 
         # Create output directory for this case
         case_dir = CFG["output_dir"] / case_id
@@ -752,11 +735,11 @@ def main():
             json.dump(summary, f, indent=2)
 
         all_summaries.append(summary)
-        print(f"  ✓ Case {case_id} complete → {case_dir}")
+        print(f" Case {case_id} complete → {case_dir}")
 
     cam_helper.close()
 
-    # ── Final summary report ───────────────────────────────
+    # Final summary report─
     print("\n[5] Saving summary report...")
 
     distances = [
@@ -788,7 +771,7 @@ def main():
     with open(CFG["output_dir"] / "summary_report.json", "w") as f:
         json.dump(summary_report, f, indent=2)
 
-    # ── Print final results ────────────────────────────────
+    # Print final results
     print("\n" + "=" * 60)
     print("  GRAD-CAM RESULTS SUMMARY")
     print("=" * 60)

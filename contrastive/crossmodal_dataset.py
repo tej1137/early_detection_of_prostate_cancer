@@ -11,16 +11,6 @@ The cross-modal contrastive loss then pulls:
     MRI_i  ↔  Clinical_i   (same patient)  → POSITIVE pair
     MRI_i  ↔  Clinical_j   (diff patient)  → NEGATIVE pair
 
-This is fundamentally different from SimCLR:
-    SimCLR:      MRI_aug1  ↔  MRI_aug2    (same scan, two views)
-    Cross-modal: MRI       ↔  Clinical    (same patient, two modalities)
-
-Why this matters:
-    The model learns that a patient's MRI appearance and their
-    clinical biomarkers are two views of the same underlying biology.
-    After training, both encoders live in a shared latent space where
-    MRI and clinical embeddings for the same patient are close.
-
 Usage:
     from contrastive.crossmodal_dataset import CrossModalDataset, get_crossmodal_loader
     loader = get_crossmodal_loader()
@@ -35,10 +25,7 @@ from pathlib import Path
 from torch.utils.data import Dataset, DataLoader
 
 
-# ══════════════════════════════════════════════════════════
 # AUGMENTATION — applied to MRI only, not clinical features
-# Clinical features are deterministic (no augmentation needed)
-# ══════════════════════════════════════════════════════════
 
 def get_mri_augmentation():
     """
@@ -59,9 +46,7 @@ def get_mri_augmentation():
     ])
 
 
-# ══════════════════════════════════════════════════════════
 # DATASET
-# ══════════════════════════════════════════════════════════
 
 class CrossModalDataset(Dataset):
     """
@@ -100,7 +85,7 @@ class CrossModalDataset(Dataset):
         self.augment = augment
         self.transform = get_mri_augmentation() if augment else None
 
-        # ── Load clinical CSV ──────────────────────────────
+        # Load clinical CSV
         df = pd.read_csv(csv_path, index_col="case_id")
         self.df = df[df["split"].isin(splits)].copy()
 
@@ -112,11 +97,11 @@ class CrossModalDataset(Dataset):
 
         self.case_ids = self.df.index.tolist()
 
-        # ── Load normalisation stats ───────────────────────
+        # Load normalisation stats
         with open(stats_path, "r") as f:
             stats = json.load(f)
 
-        # ── Pre-normalise all clinical features ───────────
+        # Pre-normalise all clinical features
         # Shape: (N, 4) — done once at init, not per-item
         features = []
         for col in self.CLINICAL_FEATURES:
@@ -141,14 +126,14 @@ class CrossModalDataset(Dataset):
     def __getitem__(self, idx: int) -> dict:
         case_id = self.case_ids[idx]
 
-        # ── MRI ───────────────────────────────────────────
+        # MRI
         mri_path = self.mri_dir / f"{case_id}.pt"
         mri = torch.load(mri_path, weights_only=True)   # (3, 20, 160, 160)
 
         if self.augment:
             mri = self._augment_mri(mri)
 
-        # ── Clinical ──────────────────────────────────────
+        # Clinical
         clinical = self.clinical_tensor[idx]   # (4,)
 
         return {
@@ -166,9 +151,9 @@ class CrossModalDataset(Dataset):
         return result.permute(0, 3, 2, 1).float().clamp(0.0, 1.0)
 
 
-# ══════════════════════════════════════════════════════════
+
 # DATALOADER FACTORY
-# ══════════════════════════════════════════════════════════
+
 
 def get_crossmodal_loader(
     batch_size  : int  = 32,

@@ -64,7 +64,7 @@ class MultimodalFusionModel(nn.Module):
                  dropout: float = 0.3):
         super().__init__()
         
-        # ═══ ENCODERS ═══
+        # ENCODERS
         self.mri_encoder = MRIEncoder(
             in_channels=mri_in_channels,
             embedding_dim=mri_embedding_dim,
@@ -77,7 +77,7 @@ class MultimodalFusionModel(nn.Module):
             dropout=dropout * 0.67  # Slightly less dropout for smaller network
         )
         
-        # ═══ FUSION LAYER ═══
+        # FUSION LAYER
         # Concatenated dimension
         fusion_dim = mri_embedding_dim + psa_embedding_dim  # 512 + 256 = 768
         
@@ -88,7 +88,7 @@ class MultimodalFusionModel(nn.Module):
             nn.Dropout(dropout)
         )
         
-        # ═══ CLASSIFIER ═══
+        # CLASSIFIER
         self.classifier = nn.Sequential(
             nn.Linear(256, 128),
             nn.ReLU(inplace=True),
@@ -159,9 +159,7 @@ class MultimodalFusionModel(nn.Module):
         }
 
 
-# ═════════════════════════════════════════════════════════
 # Sanity Check
-# ═════════════════════════════════════════════════════════
 if __name__ == "__main__":
     print("=" * 50)
     print("Multimodal Fusion Model — Sanity Check")
@@ -196,7 +194,7 @@ if __name__ == "__main__":
     
     assert logits.shape == (2, 2)
     assert probs.shape == (2,)
-    print("  ✓ PASSED")
+    print("  PASSED")
     
     # Test embeddings extraction
     print("\n[3] Testing embedding extraction...")
@@ -209,7 +207,7 @@ if __name__ == "__main__":
     assert embeddings['mri'].shape == (2, 512)
     assert embeddings['psa'].shape == (2, 256)
     assert embeddings['fused'].shape == (2, 256)
-    print("  ✓ PASSED")
+    print("  PASSED")
     
     # Memory check
     if torch.cuda.is_available():
@@ -219,4 +217,4 @@ if __name__ == "__main__":
         print(f"  Allocated: {mem_allocated:.2f} GB")
         print(f"  Reserved:  {mem_reserved:.2f} GB")
     
-    print("\n✓ SANITY CHECK PASSED — Fusion model ready for training")
+    print("\nSANITY CHECK PASSED — Fusion model ready for training")

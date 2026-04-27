@@ -6,21 +6,6 @@ Fine-tuning CLIP-Pretrained Encoders for csPCa Classification.
 Works for both Option A and Option B pretrained weights.
 Points to the correct checkpoint directory based on --option_a / --option_b.
 
-Architecture:
-    CLIP-pretrained MRI Encoder      → (B, 512)
-    CLIP-pretrained Clinical Encoder → (B, 256)   ← wider than crossmodal (128)
-    Concatenate                      → (B, 768)   ← wider than crossmodal (640)
-    Fusion Head                      → (B, 256)
-    Classifier                       → (B, 2)
-
-Comparison table after all experiments:
-    Model                           | Clinical dim | Fusion input | Expected AUROC
-    --------------------------------|--------------|--------------|----------------
-    Baseline fusion (supervised)    |     256      |     768      | ~0.77
-    SimCLR + fusion (contrastive)   |      64      |     576      | ~0.73–0.78
-    Cross-modal + fusion            |     128      |     640      | TBD
-    CLIP-A + fusion (this script)   |     256      |     768      | TBD
-    CLIP-B + fusion (this script)   |     256      |     768      | TBD
 
 Run:
     python -m mri_baseline.training.train_fusion_clip --option_a --unfrozen
@@ -51,10 +36,6 @@ from mri_baseline.models.psa_encoder      import PSAEncoder
 from mri_baseline.data.multimodal_dataset import PiCAIDataset, DataConfig
 
 
-# ══════════════════════════════════════════════════════════
-# CONFIG
-# ══════════════════════════════════════════════════════════
-
 # Checkpoint dirs per option — set at runtime based on args
 CKPT_DIRS = {
     "A": Path("/workspace/checkpoints/clip_a"),
@@ -79,11 +60,6 @@ CFG = {
     "results_dir"         : Path("/workspace/data/results/clip"),
 }
 
-
-# ══════════════════════════════════════════════════════════
-# FUSION MODEL
-# ══════════════════════════════════════════════════════════
-
 class CLIPFusionModel(nn.Module):
     """
     CLIP-pretrained MRI + Clinical encoders + classification head.
@@ -106,7 +82,7 @@ class CLIPFusionModel(nn.Module):
 
         ckpt_dir = CKPT_DIRS[option]
 
-        # ── MRI encoder ────────────────────────────────────
+        # MRI encoder 
         self.mri_encoder = MRIEncoder(
             embedding_dim=CFG["mri_encoder_dim"]
         )
@@ -114,9 +90,9 @@ class CLIPFusionModel(nn.Module):
         self.mri_encoder.load_state_dict(
             torch.load(mri_ckpt, map_location="cpu", weights_only=True)
         )
-        print(f"  ✓ CLIP-{option} MRI encoder loaded from {mri_ckpt}")
+        print(f"   CLIP-{option} MRI encoder loaded from {mri_ckpt}")
 
-        # ── Clinical encoder (256-dim — wider than crossmodal) ──
+        # Clinical encoder (256-dim — wider than crossmodal)
         self.clinical_encoder = PSAEncoder(
             in_features   = 4,
             embedding_dim = CFG["clinical_encoder_dim"],   # 256
@@ -125,19 +101,19 @@ class CLIPFusionModel(nn.Module):
         self.clinical_encoder.load_state_dict(
             torch.load(clin_ckpt, map_location="cpu", weights_only=True)
         )
-        print(f"  ✓ CLIP-{option} clinical encoder loaded from {clin_ckpt}")
+        print(f"   CLIP-{option} clinical encoder loaded from {clin_ckpt}")
 
-        # ── Freeze encoders if linear probe mode ───────────
+        # Freeze encoders if linear probe mode─
         if freeze_encoders:
             for p in self.mri_encoder.parameters():
                 p.requires_grad = False
             for p in self.clinical_encoder.parameters():
                 p.requires_grad = False
-            print(f"  ✓ Both encoders FROZEN — linear probe mode")
+            print(f"   Both encoders FROZEN — linear probe mode")
         else:
-            print(f"  ✓ Both encoders UNFROZEN — full fine-tuning")
+            print(f"   Both encoders UNFROZEN — full fine-tuning")
 
-        # ── Fusion head ────────────────────────────────────
+        # Fusion head 
         # Input is 768 (= 512 + 256) — wider than CrossModalFusionModel (640)
         self.fusion_head = nn.Sequential(
             nn.Linear(CFG["fusion_input_dim"], 256),
@@ -171,9 +147,7 @@ class CLIPFusionModel(nn.Module):
         return F.softmax(self.forward(mri, clinical), dim=1)[:, 1]
 
 
-# ══════════════════════════════════════════════════════════
 # FOCAL LOSS
-# ══════════════════════════════════════════════════════════
 
 class FocalLoss(nn.Module):
     def __init__(self, gamma: float = 2.0):
@@ -187,9 +161,7 @@ class FocalLoss(nn.Module):
         return ((1 - pt) ** self.gamma * ce_loss).mean()
 
 
-# ══════════════════════════════════════════════════════════
 # DATALOADERS
-# ══════════════════════════════════════════════════════════
 
 def build_dataloaders():
     data_cfg     = DataConfig()
@@ -220,9 +192,7 @@ def build_dataloaders():
     return train_loader, val_loader, test_loader
 
 
-# ══════════════════════════════════════════════════════════
 # EVALUATE
-# ══════════════════════════════════════════════════════════
 
 def evaluate(model, loader, device, loss_fn):
     model.eval()
@@ -251,9 +221,7 @@ def evaluate(model, loader, device, loss_fn):
     return avg_loss, acc, auroc, all_preds, all_labels, all_probs
 
 
-# ══════════════════════════════════════════════════════════
 # PLOTS
-# ══════════════════════════════════════════════════════════
 
 def save_plots(history: dict, labels, preds, run_dir: Path, tag: str):
     # Training curves
@@ -286,9 +254,7 @@ def save_plots(history: dict, labels, preds, run_dir: Path, tag: str):
     plt.close()
 
 
-# ══════════════════════════════════════════════════════════
 # TRAIN
-# ══════════════════════════════════════════════════════════
 
 def train(option: str, freeze_encoders: bool):
     device  = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -410,14 +376,14 @@ def train(option: str, freeze_encoders: bool):
             best_auroc = val_auroc
             no_improve = 0
             torch.save(model.state_dict(), ckpt_path)
-            print(f"  ✓ Best model saved  (AUROC: {best_auroc:.4f})")
+            print(f"   Best model saved  (AUROC: {best_auroc:.4f})")
         else:
             no_improve += 1
             if no_improve >= 20:
                 print(f"\n  Early stopping at epoch {epoch}")
                 break
 
-    # ── Test ───────────────────────────────────────────────
+    # Test─
     print(f"\n{'='*60}")
     print(f"  Test Evaluation  [Option {option} | {mode.upper()}]")
     print(f"{'='*60}")
@@ -445,15 +411,13 @@ def train(option: str, freeze_encoders: bool):
     with open(out_dir / f"results_{tag}.json", "w") as f:
         json.dump(results, f, indent=2)
 
-    print(f"\n  ✓ Results saved → {out_dir}")
+    print(f"\n   Results saved → {out_dir}")
     print(f"  Best Val AUROC : {best_auroc:.4f}")
     print(f"  Test AUROC     : {test_auroc:.4f}")
     print(f"{'='*60}\n")
 
 
-# ══════════════════════════════════════════════════════════
 # ENTRY POINT
-# ══════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

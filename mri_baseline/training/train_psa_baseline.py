@@ -24,10 +24,6 @@ from mri_baseline.models.psa_encoder import PSAClassifier
 from mri_baseline.data.multimodal_dataset import PiCAIDataset, DataConfig
 
 
-# ══════════════════════════════════════════════════════════
-# CONFIGURATION
-# ══════════════════════════════════════════════════════════
-
 class TrainConfig:
     output_dir           = Path("/workspace/data/results/psa_baseline")
     epochs               = 200
@@ -46,9 +42,7 @@ class TrainConfig:
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
 
-# ══════════════════════════════════════════════════════════
 # EXPERIMENT TRACKING
-# ══════════════════════════════════════════════════════════
 
 def get_run_dir(base_dir: Path) -> Path:
     """Auto-increment run folder: run_001, run_002..."""
@@ -78,12 +72,10 @@ def save_params(run_dir: Path, train_cfg: TrainConfig, data_cfg: DataConfig):
     }
     with open(run_dir / "params.json", 'w') as f:
         json.dump(params, f, indent=2)
-    print(f"  ✓ Params saved → {run_dir / 'params.json'}")
+    print(f"   Params saved → {run_dir / 'params.json'}")
 
 
-# ══════════════════════════════════════════════════════════
 # FOCAL LOSS
-# ══════════════════════════════════════════════════════════
 
 class FocalLoss(nn.Module):
     def __init__(self, gamma: float = 2.0):
@@ -97,9 +89,7 @@ class FocalLoss(nn.Module):
         return ((1 - pt) ** self.gamma * ce_loss).mean()
 
 
-# ══════════════════════════════════════════════════════════
 # DATALOADERS
-# ══════════════════════════════════════════════════════════
 
 def build_dataloaders(train_cfg: TrainConfig, data_cfg: DataConfig):
     train_ds = PiCAIDataset("train", data_cfg, augment=False, clinical_only=True)
@@ -126,9 +116,7 @@ def build_dataloaders(train_cfg: TrainConfig, data_cfg: DataConfig):
     return train_loader, val_loader, test_loader
 
 
-# ══════════════════════════════════════════════════════════
 # TRAIN / EVALUATE
-# ══════════════════════════════════════════════════════════
 
 def train_epoch(model, loader, optimiser, criterion, device):
     model.train()
@@ -163,9 +151,7 @@ def evaluate(model, loader, criterion, device):
     return total_loss / len(loader), auroc, all_labels, all_probs
 
 
-# ══════════════════════════════════════════════════════════
 # PLOTS
-# ══════════════════════════════════════════════════════════
 
 def save_training_curves(history, run_dir):
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
@@ -193,9 +179,7 @@ def save_confusion_matrix(labels, preds, run_dir):
     plt.close()
 
 
-# ══════════════════════════════════════════════════════════
 # MAIN
-# ══════════════════════════════════════════════════════════
 
 def main():
     train_cfg = TrainConfig()
@@ -256,14 +240,14 @@ def main():
                 "norm_stats" : json.load(open(data_cfg.norm_stats)),
                 "params"     : json.load(open(run_dir / "params.json")),
             }, best_ckpt)
-            print(f"    ✓ Best model saved (val AUROC: {val_auroc:.4f})")
+            print(f"     Best model saved (val AUROC: {val_auroc:.4f})")
         else:
             no_improve += 1
             if no_improve >= train_cfg.early_stop_patience:
                 print(f"\n  Early stopping at epoch {epoch}")
                 break
 
-    # ── Test ────────────────────────────────────────────────
+    # Test
     print("\n" + "=" * 60)
     print("TEST EVALUATION")
     print("=" * 60)
@@ -288,7 +272,7 @@ def main():
     with open(run_dir / "psa_results.json", 'w') as f:
         json.dump(results, f, indent=2)
 
-    print(f"\n  ✓ All outputs saved → {run_dir}")
+    print(f"\n   All outputs saved → {run_dir}")
     print(f"  Best Val AUROC : {best_auroc:.4f}")
     print(f"  Test AUROC     : {test_auroc:.4f}")
     print("=" * 60)

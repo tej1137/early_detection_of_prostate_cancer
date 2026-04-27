@@ -17,9 +17,6 @@ from sklearn.metrics import (
     RocCurveDisplay,
 )
 
-# ==========================================
-# CONFIGURATION
-# ==========================================
 # Input paths
 train_csv = r"F:\MOD002691 - FP\pi_cai_project\picai_labels\clinical_information\preprocessed_data\preprocessed_train.csv"
 val_csv   = r"F:\MOD002691 - FP\pi_cai_project\picai_labels\clinical_information\preprocessed_data\preprocessed_val.csv"
@@ -35,9 +32,7 @@ print(f"📂 Saving experiment results to: {out_dir}")
 results_csv = os.path.join(out_dir, "feature_combo_results.csv")
 results_xlsx = os.path.join(out_dir, "feature_combo_results.xlsx")
 
-# ==========================================
 # DATA LOADING
-# ==========================================
 target = "case_csPCa"
 
 train_df = pd.read_csv(train_csv)
@@ -48,9 +43,7 @@ candidate_features = ["psa_sc", "psad_sc", "patient_age_sc", "prostate_volume_sc
 available_features = [c for c in candidate_features if c in train_df.columns]
 print(f"Features available: {available_features}")
 
-# ==========================================
 # EXPERIMENT LOOP
-# ==========================================
 rows = []
 
 for k in [1, 2, 3, 4]:
@@ -98,7 +91,7 @@ for k in [1, 2, 3, 4]:
             "tn": tn, "fp": fp, "fn": fn, "tp": tp,
         })
 
-        # ---- Plot Confusion Matrix ----
+        # Plot Confusion Matrix 
         plt.figure(figsize=(4.6, 4.0), dpi=140)
         sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", cbar=False)
         plt.title(f"Confusion Matrix (VAL)\n{combo_name}")
@@ -108,7 +101,7 @@ for k in [1, 2, 3, 4]:
         plt.savefig(os.path.join(out_dir, f"CM_{k}_{combo_name}.png"), dpi=200)
         plt.close()
 
-        # ---- Plot ROC Curve ----
+        # Plot ROC Curve
         plt.figure(figsize=(4.8, 4.0), dpi=140)
         RocCurveDisplay.from_predictions(y_val, y_proba, name="LogReg")
         plt.title(f"ROC (VAL) AUC={roc:.3f}\n{combo_name}")
@@ -116,18 +109,16 @@ for k in [1, 2, 3, 4]:
         plt.savefig(os.path.join(out_dir, f"ROC_{k}_{combo_name}.png"), dpi=200)
         plt.close()
 
-# ==========================================
 # SAVE MASTER RESULTS
-# ==========================================
 results_df = pd.DataFrame(rows).sort_values(["roc_auc", "pr_auc_ap"], ascending=False)
 
 # Save to CSV
 results_df.to_csv(results_csv, index=False)
-print(f"✅ CSV saved: {results_csv}")
+print(f" CSV saved: {results_csv}")
 
 # Save to Excel
 results_df.to_excel(results_xlsx, index=False, sheet_name="Feature_Combinations")
-print(f"✅ Excel saved: {results_xlsx}")
+print(f" Excel saved: {results_xlsx}")
 
 print("\nTop 5 Combinations (ROC-AUC):")
 print(results_df.head(5)[["features", "roc_auc"]].to_string(index=False))

@@ -3,7 +3,6 @@ contrastive/train_mri_contrastive.py
 
 Fine-tuning the contrastive pretrained MRI encoder for cancer classification.
 
-What this script does:
     1. Loads pretrained encoder weights from best_encoder.pt
     2. Attaches a classification head
     3. Fine-tunes on labelled train split
@@ -39,11 +38,6 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 from mri_baseline.models.mri_encoder  import MRIEncoder
 from mri_baseline.data.multimodal_dataset import PiCAIDataset
 
-
-# ══════════════════════════════════════════════════════════
-# CONFIG
-# ══════════════════════════════════════════════════════════
-
 CFG = {
     "epochs"          : 50,
     "batch_size"      : 8,
@@ -58,9 +52,7 @@ CFG = {
 }
 
 
-# ══════════════════════════════════════════════════════════
-# CLASSIFICATION HEAD
-# ══════════════════════════════════════════════════════════
+#Classification head definition Simple MLP
 
 class ClassificationHead(nn.Module):
     """
@@ -79,11 +71,7 @@ class ClassificationHead(nn.Module):
     def forward(self, x):
         return self.net(x)
 
-
-# ══════════════════════════════════════════════════════════
-# FULL MODEL
-# ══════════════════════════════════════════════════════════
-
+#full model definition
 class FineTunedMRIModel(nn.Module):
     """Pretrained encoder + classification head."""
 
@@ -104,9 +92,7 @@ class FineTunedMRIModel(nn.Module):
         return F.softmax(self.forward(x), dim=1)[:, 1]
 
 
-# ══════════════════════════════════════════════════════════
-# HELPERS
-# ══════════════════════════════════════════════════════════
+#Helper fuctionssss
 
 def get_loaders():
     train_ds = PiCAIDataset(split="train", mri_only=True)
@@ -150,9 +136,7 @@ def evaluate(model, loader, device, loss_fn):
     return avg_loss, acc, auroc, all_preds, all_labels
 
 
-# ══════════════════════════════════════════════════════════
-# TRAINING
-# ══════════════════════════════════════════════════════════
+#Train karooo
 
 def train(freeze_encoder: bool):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -169,19 +153,19 @@ def train(freeze_encoder: bool):
 
     CFG["ckpt_dir"].mkdir(parents=True, exist_ok=True)
 
-    # ── Load pretrained encoder ────────────────────────────
+    # Load pretrained encoder
     encoder = MRIEncoder(embedding_dim=CFG["encoder_dim"])
     state   = torch.load(CFG["pretrained_path"], map_location="cpu", weights_only=True)
     encoder.load_state_dict(state)
-    print(f"  ✓ Pretrained encoder loaded from {CFG['pretrained_path']}\n")
+    print(f"  Pretrained encoder loaded from {CFG['pretrained_path']}\n")
 
     model   = FineTunedMRIModel(encoder, freeze_encoder=freeze_encoder).to(device)
 
-    # ── Class weights (same as baseline) ──────────────────
+    # Class weights (same as baseline)
     class_weights = torch.tensor([1.0, 2.0], device=device)
     loss_fn       = nn.CrossEntropyLoss(weight=class_weights)
 
-    # ── Optimiser — different LRs for encoder vs head ─────
+    # Optimiser — different LRs for encoder vs head
     if freeze_encoder:
         optimizer = optim.AdamW(
             model.head.parameters(),
@@ -200,7 +184,7 @@ def train(freeze_encoder: bool):
 
     train_loader, val_loader, test_loader = get_loaders()
 
-    # ── Log file ───────────────────────────────────────────
+    # Log file
     log_path = CFG["ckpt_dir"] / f"mri_finetune_{mode}_log.csv"
     with open(log_path, "w", newline="") as f:
         csv.writer(f).writerow([
@@ -257,9 +241,9 @@ def train(freeze_encoder: bool):
         if val_auroc > best_auroc:
             best_auroc = val_auroc
             torch.save(model.state_dict(), ckpt_path)
-            print(f"  ✓ Best model saved (AUROC: {best_auroc:.3f})")
+            print(f"  Best model saved (AUROC: {best_auroc:.3f})")
 
-    # ── Test evaluation ────────────────────────────────────
+    # Test evaluation
     print(f"\n{'='*55}")
     print(f"  Test Evaluation [{mode.upper()}]")
     print(f"{'='*55}")
@@ -272,9 +256,6 @@ def train(freeze_encoder: bool):
     print(f"\n{classification_report(labels, preds, target_names=['Benign','Cancer'])}")
 
 
-# ══════════════════════════════════════════════════════════
-# ENTRY POINT
-# ══════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

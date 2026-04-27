@@ -29,10 +29,6 @@ from contrastive.contrastive_dataset import get_contrastive_loader
 from contrastive.contrastive_model   import SimCLRModel, NTXentLoss
 
 
-# ══════════════════════════════════════════════════════════
-# CONFIG
-# ══════════════════════════════════════════════════════════
-
 CFG = {
     # Training
     "epochs"       : 100,
@@ -42,21 +38,21 @@ CFG = {
     "temperature"  : 0.07,
     "num_workers"  : 4,
 
-    # Model
+    #Model
     "encoder_dim"  : 512,
     "proj_dim"     : 128,
 
     # Scheduler — cosine decay to near zero
     "lr_min"       : 1e-6,
 
-    # Paths
+    #Paths
     "ckpt_dir"     : Path("/workspace/checkpoints/contrastive"),
 }
 
 
-# ══════════════════════════════════════════════════════════
-# TRAINING LOOP
-# ══════════════════════════════════════════════════════════
+
+#TRAINING LOOP
+
 
 def train():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -72,7 +68,7 @@ def train():
     print(f"  Temperature : {CFG['temperature']}")
     print(f"{'='*55}\n")
 
-    # ── Setup ──────────────────────────────────────────────
+    # Setup
     CFG["ckpt_dir"].mkdir(parents=True, exist_ok=True)
 
     loader  = get_contrastive_loader(
@@ -100,15 +96,15 @@ def train():
         eta_min= CFG["lr_min"],
     )
 
-    scaler = GradScaler()   # mixed precision
+    scaler = GradScaler()   #mixed precision
 
-    # ── Log file ───────────────────────────────────────────
+    # Log file
     log_path = CFG["ckpt_dir"] / "pretrain_log.csv"
     with open(log_path, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["epoch", "loss", "lr", "epoch_time_s"])
 
-    # ── Train ──────────────────────────────────────────────
+    # Train
     best_loss = float("inf")
 
     for epoch in range(1, CFG["epochs"] + 1):
@@ -141,7 +137,7 @@ def train():
         epoch_time = time.time() - t0
         current_lr = scheduler.get_last_lr()[0]
 
-        # ── Logging ────────────────────────────────────────
+        #Logging
         print(f"  Epoch [{epoch:>3}/{CFG['epochs']}]  "
               f"Loss: {avg_loss:.4f}  "
               f"LR: {current_lr:.2e}  "
@@ -152,7 +148,7 @@ def train():
             writer.writerow([epoch, round(avg_loss, 6),
                              round(current_lr, 8), round(epoch_time, 1)])
 
-        # ── Checkpointing ──────────────────────────────────
+        # Checkpoint
         if avg_loss < best_loss:
             best_loss = avg_loss
 
@@ -171,9 +167,9 @@ def train():
                 "loss"      : best_loss,
             }, CFG["ckpt_dir"] / "best_simclr.pt")
 
-            print(f"  ✓ Best model saved (loss: {best_loss:.4f})")
+            print(f" Best model saved (loss: {best_loss:.4f})")
 
-    # ── Final checkpoint ───────────────────────────────────
+    # Final checkpoint
     torch.save({
         "epoch"     : CFG["epochs"],
         "model"     : model.state_dict(),
@@ -188,9 +184,9 @@ def train():
     print(f"{'='*55}\n")
 
 
-# ══════════════════════════════════════════════════════════
+
 # ENTRY POINT
-# ══════════════════════════════════════════════════════════
+
 
 if __name__ == "__main__":
     train()

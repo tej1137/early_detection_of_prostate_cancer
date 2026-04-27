@@ -1,40 +1,3 @@
-"""
-bimri/data/bimri_dataset.py
-
-Dataset for bi-parametric MRI (biMRI) experiments.
-
-biMRI = T2W + ADC only  (drops HBV channel)
-mpMRI = T2W + ADC + HBV (what you've been using so far)
-
-Why biMRI matters clinically:
-    HBV (high b-value diffusion) requires longer acquisition time and
-    is not available in all centres. If biMRI achieves similar AUROC
-    to mpMRI, it suggests a simpler, faster, cheaper protocol may
-    be sufficient for csPCa detection.
-
-    This is an active clinical research question — your results will
-    directly contribute to this debate.
-
-What changes vs multimodal_dataset.py:
-    - MRI tensor loaded as (3, 20, 160, 160) from disk (always mpMRI)
-    - We SLICE off channel 2 (HBV) → return (2, 20, 160, 160)
-    - Everything else is identical
-
-Why slice instead of re-preprocess:
-    Your preprocessed .pt files already exist for all 1441 cases.
-    Re-running preprocess_mri.py for 2 channels would take hours.
-    Slicing [:2] at load time is instant and correct.
-
-Channel order in your .pt files (from preprocess_mri.py):
-    sequences = ["t2w", "adc", "hbv"]  → stacked in this order
-    channel 0 = T2W
-    channel 1 = ADC
-    channel 2 = HBV  ← we drop this
-
-Usage:
-    from bimri.data.bimri_dataset import BiMRIDataset, get_bimri_loaders
-"""
-
 import json
 import torch
 import numpy as np
@@ -44,9 +7,8 @@ from pathlib import Path
 from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
 
 
-# ══════════════════════════════════════════════════════════
-# AUGMENTATION  (identical to multimodal_dataset.py)
-# ══════════════════════════════════════════════════════════
+#Augmentation similar to multimodal_dataset.py
+
 
 def augment_bimri(tensor: torch.Tensor) -> torch.Tensor:
     """
@@ -68,14 +30,9 @@ def augment_bimri(tensor: torch.Tensor) -> torch.Tensor:
     return result.float().clamp(0.0, 1.0)
 
 
-# ══════════════════════════════════════════════════════════
-# DATASET
-# ══════════════════════════════════════════════════════════
-
 class BiMRIDataset(Dataset):
     """
     PyTorch Dataset for bi-parametric MRI (T2W + ADC only).
-
     Loads preprocessed .pt tensors (3 channels) and slices to 2 channels.
     Clinical features are NOT returned — biMRI experiment is MRI-only
     to give a clean comparison vs mpMRI-only baseline.
@@ -105,7 +62,7 @@ class BiMRIDataset(Dataset):
         self.augment = augment
         self.mri_dir = mri_dir
 
-        # Load and filter clinical CSV for this split
+        #Load and filter clinical CSV for this split
         df       = pd.read_csv(csv_path, index_col="case_id")
         self.df  = df[df["split"] == split].copy()
 
@@ -131,7 +88,7 @@ class BiMRIDataset(Dataset):
         case_id = self.case_ids[idx]
         label   = int(self.df.loc[case_id, "case_csPCa"])
 
-        # Load full mpMRI tensor (3, 20, 160, 160)
+        #Load full mpMRI tensor (3, 20, 160, 160)
         mri_path = self.mri_dir / f"{case_id}.pt"
 
         if not mri_path.exists():
@@ -142,10 +99,10 @@ class BiMRIDataset(Dataset):
 
         mri = torch.load(mri_path, weights_only=True)   # (3, 20, 160, 160)
 
-        # ── DROP HBV — keep T2W (ch0) and ADC (ch1) only ──
+        #DROP HBV - keeping T2W (ch0) and ADC (ch1) only!!
         mri = mri[:2]   # (2, 20, 160, 160)
 
-        # Apply augmentation (train only)
+        #Apply our augmentation (train only)
         if self.augment and self.split == "train":
             mri = augment_bimri(mri)
 
@@ -156,9 +113,7 @@ class BiMRIDataset(Dataset):
         }
 
 
-# ══════════════════════════════════════════════════════════
-# DATALOADER FACTORY
-# ══════════════════════════════════════════════════════════
+#DataLoader builder with WeightedRandomSampler for train to handle class imbalance.
 
 def get_bimri_loaders(
     batch_size  : int = 8,
@@ -181,7 +136,7 @@ def get_bimri_loaders(
     val_ds   = BiMRIDataset("val",   augment=False)
     test_ds  = BiMRIDataset("test",  augment=False)
 
-    # Weighted sampler — identical logic to train_mri_baseline.py
+    #Weighted sampler identical logic to train_mri_baseline.py
     labels       = [int(train_ds.df.loc[cid, "case_csPCa"])
                     for cid in train_ds.case_ids]
     class_counts = np.bincount(labels)

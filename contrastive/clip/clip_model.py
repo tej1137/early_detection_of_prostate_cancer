@@ -1,45 +1,3 @@
-"""
-contrastive/clip_model.py
-
-CLIP-Style Cross-Modal Model — Option A (Pure, from scratch).
-
-Architecture:
-    MRI    (3, 20, 160, 160) → MRIEncoder(512)  → MRI ProjectionHead    → z_mri  (128, L2-norm)
-    Clinical          (4,)   → PSAEncoder(256)  → Clinical ProjectionHead→ z_clin (128, L2-norm)
-
-How this differs from crossmodal_model.py:
-    crossmodal_model.py  — InfoNCE loss, learnable temperature initialised at 0.07
-    clip_model.py        — Identical CLIP loss BUT:
-                           1. PSA encoder is WIDER (256-dim vs 128-dim)
-                              → more expressive clinical representation
-                           2. Projection heads are DEEPER (3-layer vs 2-layer)
-                              → better non-linear mapping to shared space
-                           3. Temperature initialised at 0.07 but with tighter clamp
-                              → prevents temperature collapse more aggressively
-                           4. Separate optimiser param groups with different LRs
-                              → MRI encoder trains slower (larger, needs less nudging)
-
-Why these differences matter:
-    CLIP (Radford et al. 2021) used very wide text encoders relative to
-    image encoders. Here clinical features are "text" — small input (4 values)
-    but we want a rich representation. Wider PSA encoder (256-dim) gives it
-    more capacity to learn non-linear clinical interactions before projection.
-
-Option A vs Option B:
-    Option A (this file): Both encoders initialised randomly. Learns purely
-                          from MRI↔clinical alignment signal. Cleaner baseline.
-    Option B (clip_model_b.py): MRI encoder initialised from SimCLR best_encoder.pt.
-                                Clinical encoder random. Tests whether SimCLR
-                                pretraining + CLIP alignment is additive.
-
-Transfer after pretraining:
-    Discard both projection heads.
-    Load MRIEncoder(512) + PSAEncoder(256) into CLIPFusionModel.
-    Fine-tune with cross-entropy for csPCa classification.
-
-Usage:
-    from contrastive.clip_model import CLIPModel, CLIPLoss
-"""
 
 import torch
 import torch.nn as nn
@@ -52,9 +10,7 @@ from mri_baseline.models.mri_encoder import MRIEncoder
 from mri_baseline.models.psa_encoder import PSAEncoder
 
 
-# ══════════════════════════════════════════════════════════
-# PROJECTION HEADS  (deeper than crossmodal_model.py)
-# ══════════════════════════════════════════════════════════
+#DEEPER PROJECTION HEADS
 
 class MRIProjectionHead(nn.Module):
     """
@@ -63,7 +19,7 @@ class MRIProjectionHead(nn.Module):
     Extra layer vs crossmodal_model.py gives the MRI encoder
     more capacity to map 3D volumetric features into shared space.
 
-    BatchNorm after each hidden layer stabilises training — critical
+    BatchNorm after each hidden layer stabilises training - critical
     when the two modalities have very different feature scales.
     """
 
@@ -117,9 +73,7 @@ class ClinicalProjectionHead(nn.Module):
         return F.normalize(self.net(x), dim=1)   # (B, 128) unit sphere
 
 
-# ══════════════════════════════════════════════════════════
-# CLIP MODEL  — Option A (from scratch)
-# ══════════════════════════════════════════════════════════
+#CLIP MODEL - Option A (from scratch)
 
 class CLIPModel(nn.Module):
     """
@@ -141,7 +95,7 @@ class CLIPModel(nn.Module):
     def __init__(
         self,
         mri_encoder_dim     : int   = 512,
-        clinical_encoder_dim: int   = 256,   # wider than crossmodal_model (128)
+        clinical_encoder_dim: int   = 256,   #wider than crossmodal_model (128)
         proj_out_dim        : int   = 128,
         init_temperature    : float = 0.07,
     ):
@@ -150,7 +104,7 @@ class CLIPModel(nn.Module):
         self.mri_encoder_dim      = mri_encoder_dim
         self.clinical_encoder_dim = clinical_encoder_dim
 
-        # ── Encoders — both randomly initialised (Option A) ─
+        #Encoders — both randomly initialised
         self.mri_encoder = MRIEncoder(
             in_channels   = 3,
             embedding_dim = mri_encoder_dim,
@@ -158,11 +112,11 @@ class CLIPModel(nn.Module):
         )
         self.clinical_encoder = PSAEncoder(
             in_features   = 4,
-            embedding_dim = clinical_encoder_dim,   # 256 — wider
+            embedding_dim = clinical_encoder_dim,
             dropout       = 0.2,
         )
 
-        # ── Projection heads — discarded after pretraining ──
+        #Projection heads discarded after pretraining 
         self.mri_projector = MRIProjectionHead(
             in_dim     = mri_encoder_dim,
             hidden_dim = 256,
@@ -174,7 +128,7 @@ class CLIPModel(nn.Module):
             out_dim    = proj_out_dim,
         )
 
-        # ── Learnable log-temperature ──────────────────────
+        #  Learnable log-temperature 
         # log(0.07) ≈ -2.659
         # Tighter clamp than crossmodal_model: [0.01, 0.3]
         # CLIP paper found temperature saturates around 0.07–0.1
@@ -224,13 +178,13 @@ class CLIPModel(nn.Module):
         return self.clinical_encoder.state_dict()
 
 
-# ══════════════════════════════════════════════════════════
-# CLIP LOSS  (symmetric InfoNCE — identical math to CLIP paper)
-# ══════════════════════════════════════════════════════════
+
+#CLIP loss compute
+
 
 class CLIPLoss(nn.Module):
     """
-    Symmetric InfoNCE Loss — CLIP paper (Radford et al. 2021).
+    Symmetric InfoNCE Loss
 
     For a batch of N (MRI, clinical) pairs:
 
@@ -250,7 +204,6 @@ class CLIPLoss(nn.Module):
     Additional monitoring:
         - Returns diagonal similarity (positive pairs) for logging
         - Returns off-diagonal mean (negative pairs) for logging
-        These let you track alignment quality during training.
     """
 
     def forward(
@@ -279,14 +232,14 @@ class CLIPLoss(nn.Module):
         # Both inputs are L2-normalised so this is cosine similarity
         sim    = torch.mm(z_mri, z_clin.T) / temperature
 
-        # Positive pairs are on the diagonal
+        #Positive pairs are on the diagonal
         labels = torch.arange(B, device=device)
 
         loss_mri  = F.cross_entropy(sim,   labels)
         loss_clin = F.cross_entropy(sim.T, labels)
         loss      = (loss_mri + loss_clin) / 2.0
 
-        # ── Monitoring metrics ─────────────────────────────
+        #   Monitoring metrics 
         # Scale sim back to raw cosine similarity for interpretability
         with torch.no_grad():
             raw_sim     = sim * temperature.detach()
@@ -297,9 +250,9 @@ class CLIPLoss(nn.Module):
         return loss, loss_mri, loss_clin, pos_sim, neg_sim
 
 
-# ══════════════════════════════════════════════════════════
-# CLIP MODEL  — Option B (SimCLR-warm-started MRI encoder)
-# ══════════════════════════════════════════════════════════
+
+# CLIP MODEL - B SimCLR-warm-started MRI encoder
+
 
 class CLIPModelB(CLIPModel):
     """
@@ -308,16 +261,6 @@ class CLIPModelB(CLIPModel):
     Identical to CLIPModel (Option A) EXCEPT:
         MRI encoder initialised from SimCLR pretrained best_encoder.pt
         Clinical encoder still randomly initialised
-
-    Hypothesis:
-        SimCLR already taught the MRI encoder good visual representations.
-        CLIP alignment then teaches it to match those representations
-        to clinical profiles — a softer task than learning from scratch.
-
-    This may converge faster and to a better minimum than Option A
-    because the MRI encoder doesn't need to simultaneously learn
-    "what does prostate tissue look like?" AND "how does it relate
-    to clinical features?".
 
     Args:
         simclr_ckpt: path to best_encoder.pt from train_contrastive.py
@@ -336,7 +279,7 @@ class CLIPModelB(CLIPModel):
         proj_out_dim        : int   = 128,
         init_temperature    : float = 0.07,
     ):
-        # Initialise Option A (random weights)
+        #Initialise Option A
         super().__init__(
             mri_encoder_dim      = mri_encoder_dim,
             clinical_encoder_dim = clinical_encoder_dim,
@@ -344,7 +287,7 @@ class CLIPModelB(CLIPModel):
             init_temperature     = init_temperature,
         )
 
-        # ── Load SimCLR pretrained MRI encoder ────────────
+        #Load SimCLR pretrained MRI encoder 
         if not simclr_ckpt.exists():
             raise FileNotFoundError(
                 f"SimCLR checkpoint not found: {simclr_ckpt}\n"
@@ -353,12 +296,12 @@ class CLIPModelB(CLIPModel):
 
         state = torch.load(simclr_ckpt, map_location="cpu", weights_only=True)
         self.mri_encoder.load_state_dict(state)
-        print(f"  ✓ [Option B] SimCLR MRI encoder loaded from {simclr_ckpt}")
+        print(f"[Option B] SimCLR MRI encoder loaded from {simclr_ckpt}")
 
-        # ── Optionally freeze MRI encoder ─────────────────
+        #  Optionally freeze MRI encoder ─
         if freeze_mri:
             for param in self.mri_encoder.parameters():
                 param.requires_grad = False
-            print(f"  ✓ [Option B] MRI encoder FROZEN — only clinical encoder + heads train")
+            print(f" [Option B] MRI encoder FROZEN — only clinical encoder + heads train")
         else:
-            print(f"  ✓ [Option B] MRI encoder UNFROZEN — full CLIP alignment")
+            print(f" [Option B] MRI encoder UNFROZEN — full CLIP alignment")

@@ -1,45 +1,8 @@
 """
-bimri/training/train_bimri_fusion.py
-
-Fusion model for bi-parametric MRI (T2W + ADC) + PSA clinical features.
-
-Research question:
-    Does adding PSA clinical features to biMRI close the gap with mpMRI fusion?
-
-    mpMRI alone          → 0.71   AUROC
-    biMRI alone          → 0.6745 AUROC  (-0.035)
-    mpMRI + PSA fusion   → 0.7823 AUROC
-    biMRI + PSA fusion   → TBD          ← this script
-
-    If biMRI+PSA ≈ mpMRI+PSA:
-        "Clinical data compensates for simpler MRI acquisition"
-        → biMRI protocol sufficient when PSA data available
-
-    If biMRI+PSA < mpMRI+PSA:
-        "HBV sequence provides unique information not captured by PSA"
-        → full mpMRI required for optimal performance
-
-Architecture:
-    BiMRIEncoder (in_channels=2)  → (B, 512)   T2W + ADC only
-    PSAEncoder   (in_features=4)  → (B, 256)   PSA, PSAD, volume, age
-    Concatenate                   → (B, 768)
-    Fusion head                   → (B, 256)
-    Classifier                    → (B, 2)
-
+Train biMRI + PSA clinical features fusion model.
 Two modes:
-    --scratch  : BiMRI encoder randomly initialised (default)
+    --scratch  : BiMRI encoder randomly initialised 
     --pretrained: Load BiMRI encoder from best_bimri_model.pt
-
-Output:
-    /workspace/data/results/bimri/
-        fusion_results_scratch.json
-        fusion_results_pretrained.json
-        fusion_training_curves.png
-        fusion_confusion_matrix.png
-
-    /workspace/checkpoints/bimri/
-        fusion_bimri_scratch.pt
-        fusion_bimri_pretrained.pt
 
 Run:
     python -m bimri.training.train_bimri_fusion --scratch
@@ -70,37 +33,31 @@ from mri_baseline.models.psa_encoder          import PSAEncoder
 from mri_baseline.data.multimodal_dataset     import PiCAIDataset, DataConfig
 
 
-# ══════════════════════════════════════════════════════════
-# CONFIG
-# ══════════════════════════════════════════════════════════
-
 CFG = {
     "epochs"              : 75,
     "batch_size"          : 8,
     "lr_head"             : 1e-3,
-    "lr_encoder"          : 3e-5,     # same as train_mri_baseline.py
+    "lr_encoder"          : 3e-5,     #same as train_mri_baseline.py
     "weight_decay"        : 1e-2,
     "num_workers"         : 4,
     "focal_loss_gamma"    : 2.0,
     "early_stop_patience" : 20,
 
-    # Encoder dims
+    #Encoder dims
     "mri_encoder_dim"     : 512,
     "psa_encoder_dim"     : 256,
-    "fusion_input_dim"    : 768,      # 512 + 256
+    "fusion_input_dim"    : 768,      #512 + 256
 
-    # Pretrained biMRI encoder path
+    #Pretrained biMRI encoder path
     "bimri_ckpt"          : Path("/workspace/data/results/bimri/run_001/best_bimri_model.pt"),
 
-    # Output
+    #Output
     "ckpt_dir"            : Path("/workspace/checkpoints/bimri"),
     "results_dir"         : Path("/workspace/data/results/bimri"),
 }
 
 
-# ══════════════════════════════════════════════════════════
-# FUSION MODEL
-# ══════════════════════════════════════════════════════════
+#Fusion model with BiMRI encoder + PSA encoder + fusion head + classifier
 
 class BiMRIFusionModel(nn.Module):
     """
@@ -119,7 +76,7 @@ class BiMRIFusionModel(nn.Module):
     def __init__(self, use_pretrained: bool = False):
         super().__init__()
 
-        # ── BiMRI encoder (2 channels) ─────────────────────
+        #BiMRI encoder (2 channels)
         self.mri_encoder = BiMRIEncoder(
             in_channels   = 2,
             embedding_dim = CFG["mri_encoder_dim"],
@@ -135,7 +92,7 @@ class BiMRIFusionModel(nn.Module):
             ckpt = torch.load(
                 CFG["bimri_ckpt"], map_location="cpu", weights_only=True
             )
-            # Checkpoint saves full model state — extract encoder weights
+            #Checkpoint saves full model state  extract encoder weights
             full_state  = ckpt["model_state"]
             encoder_state = {
                 k.replace("encoder.", "", 1): v
@@ -147,7 +104,7 @@ class BiMRIFusionModel(nn.Module):
         else:
             print(f"  ✓ biMRI encoder randomly initialised (from scratch)")
 
-        # ── PSA encoder ────────────────────────────────────
+        #PSA encoder
         self.psa_encoder = PSAEncoder(
             in_features   = 4,
             embedding_dim = CFG["psa_encoder_dim"],
@@ -155,7 +112,7 @@ class BiMRIFusionModel(nn.Module):
         )
         print(f"  ✓ PSA encoder randomly initialised")
 
-        # ── Fusion head ────────────────────────────────────
+        #Fusion head
         self.fusion_head = nn.Sequential(
             nn.Linear(CFG["fusion_input_dim"], 256),
             nn.BatchNorm1d(256),
@@ -185,8 +142,7 @@ class BiMRIFusionModel(nn.Module):
         Returns:
             logits  : (B, 2)
         """
-        # ── Slice MRI to 2 channels if full mpMRI loaded ───
-        # Safety check — dataset returns 2ch but just in case
+        #Slice MRI
         if mri.shape[1] == 3:
             mri = mri[:, :2]   # drop HBV
 
@@ -200,10 +156,6 @@ class BiMRIFusionModel(nn.Module):
         return F.softmax(self.forward(mri, clinical), dim=1)[:, 1]
 
 
-# ══════════════════════════════════════════════════════════
-# FOCAL LOSS
-# ══════════════════════════════════════════════════════════
-
 class FocalLoss(nn.Module):
     def __init__(self, gamma: float = 2.0):
         super().__init__()
@@ -215,12 +167,7 @@ class FocalLoss(nn.Module):
         pt      = torch.exp(-ce_loss)
         return ((1 - pt) ** self.gamma * ce_loss).mean()
 
-
-# ══════════════════════════════════════════════════════════
-# DATALOADERS
-# Uses PiCAIDataset — returns full 3ch MRI, we slice to 2ch in model
-# ══════════════════════════════════════════════════════════
-
+#Use PiCAIDataset returns full 3ch MRI, we slice to 2ch in model
 def build_dataloaders():
     data_cfg = DataConfig()
 
@@ -252,10 +199,7 @@ def build_dataloaders():
     )
     return train_loader, val_loader, test_loader
 
-
-# ══════════════════════════════════════════════════════════
-# EVALUATE
-# ══════════════════════════════════════════════════════════
+#Evaluatee
 
 def evaluate(model, loader, device, loss_fn):
     model.eval()
@@ -283,10 +227,7 @@ def evaluate(model, loader, device, loss_fn):
     auroc    = roc_auc_score(all_labels, all_probs)
     return avg_loss, acc, auroc, all_preds, all_labels, all_probs
 
-
-# ══════════════════════════════════════════════════════════
-# PLOTS
-# ══════════════════════════════════════════════════════════
+#Plot cheyuu
 
 def save_plots(history, labels, preds, results_dir, tag):
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
@@ -315,10 +256,7 @@ def save_plots(history, labels, preds, results_dir, tag):
     plt.savefig(results_dir / f"fusion_confusion_matrix_{tag}.png", dpi=150)
     plt.close()
 
-
-# ══════════════════════════════════════════════════════════
-# TRAIN
-# ══════════════════════════════════════════════════════════
+#trainnn cheyuu
 
 def train(use_pretrained: bool):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -432,16 +370,16 @@ def train(use_pretrained: bool):
             best_auroc = val_auroc
             no_improve = 0
             torch.save(model.state_dict(), ckpt_path)
-            print(f"  ✓ Best model saved  (AUROC: {best_auroc:.4f})")
+            print(f"Best model saved  (AUROC: {best_auroc:.4f})")
         else:
             no_improve += 1
             if no_improve >= CFG["early_stop_patience"]:
                 print(f"\n  Early stopping at epoch {epoch}")
                 break
 
-    # ── Test ───────────────────────────────────────────────
+    #Test 
     print(f"\n{'='*60}")
-    print(f"  Test Evaluation  [biMRI Fusion — {tag.upper()}]")
+    print(f"  Test Evaluation  [biMRI Fusion {tag.upper()}]")
     print(f"{'='*60}")
 
     model.load_state_dict(torch.load(ckpt_path, weights_only=True))
@@ -481,13 +419,10 @@ def train(use_pretrained: bool):
     with open(CFG["results_dir"] / f"fusion_results_{tag}.json", "w") as f:
         json.dump(results, f, indent=2)
 
-    print(f"  ✓ Results saved → {CFG['results_dir']}")
+    print(f"Results saved → {CFG['results_dir']}")
     print(f"{'='*60}\n")
 
-
-# ══════════════════════════════════════════════════════════
-# ENTRY POINT
-# ══════════════════════════════════════════════════════════
+#Run the training
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

@@ -3,7 +3,6 @@ preprocessing/preprocess_mri.py
 
 ONE-TIME preprocessing script for PI-CAI MRI data.
 
-What this does:
   For each case in clinical_preprocessed.csv:
     1. Finds T2W, ADC, HBV .mha files on disk
     2. Resamples to consistent voxel spacing
@@ -11,7 +10,6 @@ What this does:
     4. Normalises intensities per-sequence
     5. Saves as 3-channel .pt tensor → (3, D, H, W)
 
-Run once (on RunPod — do NOT run locally, no MRI data):
   python -m mri_baseline.preprocessing.preprocess_mri
 
 Outputs:
@@ -31,13 +29,8 @@ import torch
 from pathlib import Path
 from tqdm import tqdm
 
-
-# ══════════════════════════════════════════════════════════
-# CONFIGURATION
-# ══════════════════════════════════════════════════════════
-
 class Config:
-    # ── Input ──────────────────────────────────────────────
+    # Input ─
     clinical_csv  = Path("/workspace/data/preprocessed/clinical_preprocessed.csv")
     mri_root      = Path("/workspace/data/images")   # ← parent of all folds
     mri_folds     = ["picai_public_images_fold0",
@@ -46,34 +39,34 @@ class Config:
                      "picai_public_images_fold3",
                      "picai_public_images_fold4"]    # ← search all folds
 
-    # ── Output ─────────────────────────────────────────────
+    # Output 
     output_dir    = Path("/workspace/data/preprocessed/mri")
     missing_log   = Path("/workspace/data/preprocessed/missing_mri_cases.txt")
     audit_json    = Path("/workspace/data/preprocessed/mri_audit.json")
 
-    # ── MRI sequences to load ──────────────────────────────
+    # MRI sequences to load 
     # These 3 channels stack into (3, D, H, W)
     sequences     = ["t2w", "adc", "hbv"]
 
-    # ── Resampling ─────────────────────────────────────────
+    # Resampling
     # Target voxel spacing in mm: (axial_slice_thickness, in-plane, in-plane)
     # PI-CAI T2W is typically ~3mm slice thickness, 0.5mm in-plane
     # We resample everything to uniform spacing so all volumes are comparable
     target_spacing = (3.0, 0.5, 0.5)   # (z, y, x) in mm
 
-    # ── Volume size after crop/pad ─────────────────────────
+    # Volume size after crop/pad
     # Fixed spatial dimensions: (depth, height, width)
     # After resampling to 3mm z-spacing: ~20 slices covers the prostate
     # After resampling to 0.5mm xy: 160x160 covers the prostate ROI
     target_size    = (20, 160, 160)     # (D, H, W)
 
-    # ── Intensity normalisation ────────────────────────────
+    # Intensity normalisation
     # We clip to percentiles first to remove extreme outliers,
     # then normalise to [0, 1] range.
     clip_percentile_low  = 1.0    # clip values below 1st percentile
     clip_percentile_high = 99.0   # clip values above 99th percentile
 
-    # ── Skip already processed cases ──────────────────────
+    # Skip already processed cases
     # If True: skip cases where .pt already exists (for resuming)
     # If False: reprocess everything from scratch
     skip_existing  = True
@@ -82,9 +75,8 @@ class Config:
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
 
-# ══════════════════════════════════════════════════════════
-# STEP 1 — AUDIT: FIND MISSING MRI FILES
-# ══════════════════════════════════════════════════════════
+#FIND MISSING MRI FILES
+
 
 def find_case_dir(case_id: str, config: Config):
     """
@@ -142,14 +134,12 @@ def audit_mri_files(config: Config, case_ids: list) -> tuple[list, list]:
             f.write("# Cases missing MRI files\n")
             for cid in missing_cases:
                 f.write(f"{cid}  # missing: {missing_detail[cid]}\n")
-        print(f"\n  ✓ Missing cases logged to: {config.missing_log}")
+        print(f"\n   Missing cases logged to: {config.missing_log}")
 
     return valid_cases, missing_cases   # ← THIS LINE WAS MISSING
 
 
-# ══════════════════════════════════════════════════════════
-# STEP 2 — LOAD MRI VOLUME
-# ══════════════════════════════════════════════════════════
+# LOAD MRI VOLUME
 
 def load_mha(fpath: Path) -> sitk.Image:
     """
@@ -165,15 +155,12 @@ def load_mha(fpath: Path) -> sitk.Image:
     return sitk.ReadImage(str(fpath), sitk.sitkFloat32)
 
 
-# ══════════════════════════════════════════════════════════
-# STEP 3 — RESAMPLE TO UNIFORM SPACING
-# ══════════════════════════════════════════════════════════
+#RESAMPLE TO UNIFORM SPACING
 
 def resample_volume(image: sitk.Image, target_spacing: tuple) -> sitk.Image:
     """
     Resample image to a fixed voxel spacing using B-spline interpolation.
 
-    WHY we resample:
       Different scanners acquire at different voxel spacings.
       e.g. one case: spacing = (3.0, 0.45, 0.45)
            another:  spacing = (3.6, 0.52, 0.52)
@@ -219,9 +206,7 @@ def resample_volume(image: sitk.Image, target_spacing: tuple) -> sitk.Image:
     return resampler.Execute(image)
 
 
-# ══════════════════════════════════════════════════════════
-# STEP 4 — CROP OR PAD TO FIXED SIZE
-# ══════════════════════════════════════════════════════════
+#CROP OR PAD TO FIXED SIZE
 
 def crop_or_pad(volume: np.ndarray, target_size: tuple) -> np.ndarray:
     """
@@ -267,9 +252,7 @@ def crop_or_pad(volume: np.ndarray, target_size: tuple) -> np.ndarray:
     return result
 
 
-# ══════════════════════════════════════════════════════════
-# STEP 5 — NORMALISE INTENSITY
-# ══════════════════════════════════════════════════════════
+#NORMALISE INTENSITY
 
 def normalise_intensity(volume: np.ndarray, clip_low: float, clip_high: float) -> np.ndarray:
     """
@@ -288,7 +271,7 @@ def normalise_intensity(volume: np.ndarray, clip_low: float, clip_high: float) -
         ADC:  0–3000 (×10⁻⁶ mm²/s)
         HBV:  0–800  (arbitrary scanner units)
 
-    Note: We do NOT use global mean/std normalisation here because:
+We do NOT use global mean/std normalisation here because:
       - MRI intensity is not standardised across scanners
       - Z-score normalisation can go negative (bad for some activations)
       - Per-case [0,1] is standard in medical imaging deep learning
@@ -316,9 +299,7 @@ def normalise_intensity(volume: np.ndarray, clip_low: float, clip_high: float) -
     return volume.astype(np.float32)
 
 
-# ══════════════════════════════════════════════════════════
-# STEP 6 — PROCESS ONE CASE
-# ══════════════════════════════════════════════════════════
+#PROCESS ONE CASE
 
 def process_case(case_id: str, config: Config) -> bool:
     output_path = config.output_dir / f"{case_id}.pt"
@@ -345,9 +326,7 @@ def process_case(case_id: str, config: Config) -> bool:
     return True
 
 
-# ══════════════════════════════════════════════════════════
-# STEP 7 — PROCESS ALL CASES
-# ══════════════════════════════════════════════════════════
+#PROCESS ALL CASES
 
 def process_all_cases(valid_cases: list, config: Config) -> dict:
     """
@@ -387,10 +366,10 @@ def process_all_cases(valid_cases: list, config: Config) -> dict:
 
     elapsed = time.time() - start_time
 
-    print(f"\n  ✓ Processed successfully : {len(successes) - skipped}")
-    print(f"  ⏭  Skipped (already done): {skipped}")
-    print(f"  ❌ Failed                : {len(failures)}")
-    print(f"  ⏱  Time elapsed          : {elapsed/60:.1f} min")
+    print(f"\n   Processed successfully : {len(successes) - skipped}")
+    print(f"  Skipped (already done): {skipped}")
+    print(f"  Failed                : {len(failures)}")
+    print(f"  Time elapsed          : {elapsed/60:.1f} min")
 
     if failures:
         print(f"\n  Failed cases:")
@@ -407,9 +386,7 @@ def process_all_cases(valid_cases: list, config: Config) -> dict:
     }
 
 
-# ══════════════════════════════════════════════════════════
-# STEP 8 — VALIDATE OUTPUTS
-# ══════════════════════════════════════════════════════════
+#VALIDATE OUTPUTS
 
 def validate_outputs(valid_cases: list, config: Config, audit: dict):
     """
@@ -431,9 +408,9 @@ def validate_outputs(valid_cases: list, config: Config, audit: dict):
     missing_pt = [cid for cid in valid_cases
                   if not (config.output_dir / f"{cid}.pt").exists()]
     if missing_pt:
-        errors.append(f"❌ {len(missing_pt)} .pt files not found: {missing_pt[:5]}")
+        errors.append(f" {len(missing_pt)} .pt files not found: {missing_pt[:5]}")
     else:
-        print(f"  ✓ All {len(valid_cases)} .pt files present")
+        print(f"   All {len(valid_cases)} .pt files present")
 
     # Check 2: Spot-check 5 random cases
     import random
@@ -448,35 +425,33 @@ def validate_outputs(valid_cases: list, config: Config, audit: dict):
         range_ok  = (t.min() >= 0.0) and (t.max() <= 1.0)
         finite_ok = torch.isfinite(t).all().item()
 
-        status = "✓" if (shape_ok and range_ok and finite_ok) else "❌"
+        status = "" if (shape_ok and range_ok and finite_ok) else "no"
         print(f"    {status}  {cid}  shape={tuple(t.shape)}  "
               f"range=[{t.min():.3f}, {t.max():.3f}]  finite={finite_ok}")
 
         if not shape_ok:
-            errors.append(f"❌ {cid}: shape {t.shape} != {expected_shape}")
+            errors.append(f" {cid}: shape {t.shape} != {expected_shape}")
         if not range_ok:
-            errors.append(f"❌ {cid}: values outside [0,1]: [{t.min():.3f}, {t.max():.3f}]")
+            errors.append(f" {cid}: values outside [0,1]: [{t.min():.3f}, {t.max():.3f}]")
         if not finite_ok:
-            errors.append(f"❌ {cid}: NaN or Inf values found")
+            errors.append(f" {cid}: NaN or Inf values found")
 
     # Save audit JSON
     audit["validation_errors"] = errors
     audit["spot_checked"] = sample
     with open(config.audit_json, 'w') as f:
         json.dump(audit, f, indent=2)
-    print(f"\n  ✓ Audit saved: {config.audit_json}")
+    print(f"\n   Audit saved: {config.audit_json}")
 
     if errors:
         print("\n  VALIDATION ERRORS:")
         for e in errors:
             print(f"    {e}")
     else:
-        print(f"\n  ✓ All validation checks passed")
+        print(f"\n   All validation checks passed")
 
 
-# ══════════════════════════════════════════════════════════
 # MAIN
-# ══════════════════════════════════════════════════════════
 
 def main():
     print("=" * 60)
@@ -498,7 +473,7 @@ def main():
         raise RuntimeError("No valid cases found — check mri_root path in Config")
 
     if missing_cases:
-        print(f"\n  ⚠️  {len(missing_cases)} cases have missing MRI files.")
+        print(f"\n    {len(missing_cases)} cases have missing MRI files.")
         print(f"  → These are logged to: {config.missing_log}")
         print(f"  → Add them to preprocess_clinical.py and re-run it first.")
         print(f"  → Continuing to preprocess the {len(valid_cases)} valid cases...\n")
@@ -517,13 +492,13 @@ def main():
     print(f"  Audit report           : {config.audit_json}")
 
     if missing_cases:
-        print(f"\n  ⚠️  NEXT STEP BEFORE TRAINING:")
+        print(f"\n    NEXT STEP BEFORE TRAINING:")
         print(f"  1. Open preprocess_clinical.py")
         print(f"  2. Add cases from {config.missing_log} to Config.known_missing_mri")
         print(f"  3. Re-run preprocess_clinical.py")
         print(f"  4. Then begin training")
     else:
-        print(f"\n  ✓ No missing MRI cases — ready to train!")
+        print(f"\n   No missing MRI cases — ready to train!")
 
     print("=" * 60)
 

@@ -11,10 +11,6 @@ What this script does:
        → Clinical encoder learns to match its patient's MRI
     4. Saves BOTH pretrained encoder weights for fine-tuning
 
-This is fundamentally different from train_contrastive.py (SimCLR):
-    SimCLR:      one encoder, two views of the SAME modality (MRI aug1 vs aug2)
-    Cross-modal: two encoders, two DIFFERENT modalities (MRI vs clinical)
-
 Output:
     /workspace/checkpoints/crossmodal/
         best_mri_encoder.pt         ← best MRI encoder weights (for fine-tuning)
@@ -39,15 +35,10 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 from contrastive.crossmodal_dataset import get_crossmodal_loader
 from contrastive.crossmodal_model   import CrossModalModel, InfoNCELoss
 
-
-# ══════════════════════════════════════════════════════════
-# CONFIG
-# ══════════════════════════════════════════════════════════
-
 CFG = {
     # Training
     "epochs"             : 100,
-    "batch_size"         : 32,      # RTX 5090 32GB — larger batch = more negatives
+    "batch_size"         : 32,     
     "lr"                 : 3e-4,
     "weight_decay"       : 1e-4,
     "num_workers"        : 4,
@@ -71,9 +62,7 @@ CFG = {
 }
 
 
-# ══════════════════════════════════════════════════════════
-# TRAINING LOOP
-# ══════════════════════════════════════════════════════════
+#Training loop for cross-modal contrastive pretraining
 
 def train():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -93,7 +82,7 @@ def train():
     print(f"  Proj dim    : {CFG['proj_out_dim']}")
     print(f"{'='*60}\n")
 
-    # ── Setup ──────────────────────────────────────────────
+    #Setup
     CFG["ckpt_dir"].mkdir(parents=True, exist_ok=True)
 
     loader = get_crossmodal_loader(
@@ -125,9 +114,9 @@ def train():
         eta_min = CFG["lr_min"],
     )
 
-    scaler = GradScaler()   # mixed precision — important for RTX 5090
+    scaler = GradScaler()   # mixed precision
 
-    # ── Log file ───────────────────────────────────────────
+    # Log file
     log_path = CFG["ckpt_dir"] / "pretrain_log.csv"
     with open(log_path, "w", newline="") as f:
         writer = csv.writer(f)
@@ -136,7 +125,7 @@ def train():
             "temperature", "lr", "epoch_time_s"
         ])
 
-    # ── Print model sizes ──────────────────────────────────
+    # Print model sizes
     total_params = sum(p.numel() for p in model.parameters())
     mri_params   = sum(p.numel() for p in model.mri_encoder.parameters())
     clin_params  = sum(p.numel() for p in model.clinical_encoder.parameters())
@@ -147,7 +136,7 @@ def train():
     print(f"\n  Batches per epoch: {len(loader)}")
     print(f"  Negatives per sample: {CFG['batch_size'] - 1}\n")
 
-    # ── Train ──────────────────────────────────────────────
+    #Train
     best_loss = float("inf")
 
     for epoch in range(1, CFG["epochs"] + 1):
@@ -183,7 +172,7 @@ def train():
 
         scheduler.step()
 
-        # ── Epoch stats ────────────────────────────────────
+        #Epoch stats
         n_batches  = len(loader)
         avg_loss   = epoch_loss      / n_batches
         avg_mri    = epoch_loss_mri  / n_batches
@@ -213,7 +202,7 @@ def train():
                 round(epoch_time, 1),
             ])
 
-        # ── Checkpointing ──────────────────────────────────
+        # Checkpoint
         if avg_loss < best_loss:
             best_loss = avg_loss
 
@@ -241,7 +230,7 @@ def train():
 
             print(f"  ✓ Best model saved  (loss: {best_loss:.4f})")
 
-    # ── Final checkpoint ───────────────────────────────────
+    # Final checkpoint
     torch.save({
         "epoch"      : CFG["epochs"],
         "model"      : model.state_dict(),
@@ -260,9 +249,7 @@ def train():
     print(f"  Next step: run train_fusion_crossmodal.py")
 
 
-# ══════════════════════════════════════════════════════════
 # ENTRY POINT
-# ══════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
     train()

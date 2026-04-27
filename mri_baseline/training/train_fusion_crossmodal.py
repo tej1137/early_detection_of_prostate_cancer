@@ -3,7 +3,6 @@ mri_baseline/training/train_fusion_crossmodal.py
 
 Fine-tuning Cross-Modal Pretrained Encoders for csPCa Classification.
 
-What this script does:
     1. Loads BOTH pretrained encoders from cross-modal pretraining
        (best_mri_encoder.pt + best_clinical_encoder.pt)
     2. Attaches a fusion + classification head
@@ -57,10 +56,6 @@ from mri_baseline.models.psa_encoder      import PSAEncoder
 from mri_baseline.data.multimodal_dataset import PiCAIDataset, DataConfig
 
 
-# ══════════════════════════════════════════════════════════
-# CONFIG
-# ══════════════════════════════════════════════════════════
-
 CFG = {
     "epochs"           : 50,
     "batch_size"       : 8,
@@ -86,9 +81,7 @@ CFG = {
 }
 
 
-# ══════════════════════════════════════════════════════════
 # FUSION MODEL
-# ══════════════════════════════════════════════════════════
 
 class CrossModalFusionModel(nn.Module):
     """
@@ -107,15 +100,15 @@ class CrossModalFusionModel(nn.Module):
     def __init__(self, freeze_encoders: bool = False):
         super().__init__()
 
-        # ── MRI encoder — load cross-modal pretrained weights ──
+        #  MRI encoder — load cross-modal pretrained weights 
         self.mri_encoder = MRIEncoder(embedding_dim=CFG["mri_encoder_dim"])
         mri_state = torch.load(
             CFG["mri_ckpt"], map_location="cpu", weights_only=True
         )
         self.mri_encoder.load_state_dict(mri_state)
-        print(f"  ✓ Cross-modal MRI encoder loaded from {CFG['mri_ckpt']}")
+        print(f"  Cross-modal MRI encoder loaded from {CFG['mri_ckpt']}")
 
-        # ── Clinical encoder — load cross-modal pretrained weights ──
+        #  Clinical encoder — load cross-modal pretrained weights 
         self.clinical_encoder = PSAEncoder(
             in_features   = 4,
             embedding_dim = CFG["clinical_encoder_dim"],
@@ -124,19 +117,19 @@ class CrossModalFusionModel(nn.Module):
             CFG["clinical_ckpt"], map_location="cpu", weights_only=True
         )
         self.clinical_encoder.load_state_dict(clin_state)
-        print(f"  ✓ Cross-modal clinical encoder loaded from {CFG['clinical_ckpt']}")
+        print(f"  Cross-modal clinical encoder loaded from {CFG['clinical_ckpt']}")
 
-        # ── Optionally freeze both encoders ───────────────
+        #  Optionally freeze both encoders 
         if freeze_encoders:
             for param in self.mri_encoder.parameters():
                 param.requires_grad = False
             for param in self.clinical_encoder.parameters():
                 param.requires_grad = False
-            print(f"  ✓ Both encoders FROZEN — training head only")
+            print(f"  Both encoders FROZEN — training head only")
         else:
-            print(f"  ✓ Both encoders UNFROZEN — full fine-tuning")
+            print(f"  Both encoders UNFROZEN — full fine-tuning")
 
-        # ── Fusion head ────────────────────────────────────
+        #  Fusion head 
         self.fusion_head = nn.Sequential(
             nn.Linear(CFG["fusion_input_dim"], 256),
             nn.BatchNorm1d(256),
@@ -147,10 +140,10 @@ class CrossModalFusionModel(nn.Module):
             nn.Dropout(0.3),
         )
 
-        # ── Classifier ─────────────────────────────────────
+        #  Classifier 
         self.classifier = nn.Linear(128, 2)
 
-        # ── Initialise new layers ──────────────────────────
+        #  Initialise new layers 
         self._init_new_layers()
 
     def _init_new_layers(self):
@@ -179,9 +172,7 @@ class CrossModalFusionModel(nn.Module):
         return F.softmax(self.forward(mri, clinical), dim=1)[:, 1]
 
 
-# ══════════════════════════════════════════════════════════
 # DATALOADERS
-# ══════════════════════════════════════════════════════════
 
 def build_dataloaders():
     data_cfg = DataConfig()
@@ -217,9 +208,7 @@ def build_dataloaders():
     return train_loader, val_loader, test_loader
 
 
-# ══════════════════════════════════════════════════════════
 # FOCAL LOSS  (same as baseline scripts for fair comparison)
-# ══════════════════════════════════════════════════════════
 
 class FocalLoss(nn.Module):
     def __init__(self, gamma: float = 2.0):
@@ -233,9 +222,7 @@ class FocalLoss(nn.Module):
         return ((1 - pt) ** self.gamma * ce_loss).mean()
 
 
-# ══════════════════════════════════════════════════════════
 # EVALUATE
-# ══════════════════════════════════════════════════════════
 
 def evaluate(model, loader, device, loss_fn):
     model.eval()
@@ -264,9 +251,7 @@ def evaluate(model, loader, device, loss_fn):
     return avg_loss, acc, auroc, all_preds, all_labels, all_probs
 
 
-# ══════════════════════════════════════════════════════════
 # PLOTS
-# ══════════════════════════════════════════════════════════
 
 def save_confusion_matrix(labels, preds, run_dir: Path, mode: str):
     cm = confusion_matrix(labels, preds)
@@ -299,9 +284,7 @@ def save_training_curves(history: dict, run_dir: Path, mode: str):
     plt.close()
 
 
-# ══════════════════════════════════════════════════════════
 # TRAINING
-# ══════════════════════════════════════════════════════════
 
 def train(freeze_encoders: bool):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -324,7 +307,7 @@ def train(freeze_encoders: bool):
     model   = CrossModalFusionModel(freeze_encoders=freeze_encoders).to(device)
     loss_fn = FocalLoss(gamma=2.0)
 
-    # ── Optimiser — separate LRs for encoders vs head ─────
+    #  Optimiser — separate LRs for encoders vs head 
     if freeze_encoders:
         optimizer = optim.AdamW(
             filter(lambda p: p.requires_grad, model.parameters()),
@@ -345,7 +328,7 @@ def train(freeze_encoders: bool):
 
     train_loader, val_loader, test_loader = build_dataloaders()
 
-    # ── Log file ───────────────────────────────────────────
+    #  Log file 
     log_path = CFG["ckpt_dir"] / f"fusion_crossmodal_{mode}_log.csv"
     with open(log_path, "w", newline="") as f:
         csv.writer(f).writerow([
@@ -360,7 +343,7 @@ def train(freeze_encoders: bool):
     ckpt_path  = CFG["ckpt_dir"] / f"fusion_crossmodal_{mode}.pt"
 
     for epoch in range(1, CFG["epochs"] + 1):
-        # ── Train epoch ────────────────────────────────────
+        #  Train epoch 
         model.train()
         if freeze_encoders:
             model.mri_encoder.eval()
@@ -401,7 +384,7 @@ def train(freeze_encoders: bool):
         )
         epoch_time = time.time() - t0
 
-        # ── Logging ────────────────────────────────────────
+        #  Logging 
         history["train_loss"].append(avg_train)
         history["val_loss"].append(val_loss)
         history["train_auroc"].append(train_auroc)
@@ -422,19 +405,19 @@ def train(freeze_encoders: bool):
                 round(val_auroc,   4),
             ])
 
-        # ── Checkpointing ──────────────────────────────────
+        #  Checkpointing 
         if val_auroc > best_auroc:
             best_auroc = val_auroc
             no_improve = 0
             torch.save(model.state_dict(), ckpt_path)
-            print(f"  ✓ Best model saved  (AUROC: {best_auroc:.4f})")
+            print(f"  Best model saved  (AUROC: {best_auroc:.4f})")
         else:
             no_improve += 1
             if no_improve >= 20:
                 print(f"\n  Early stopping at epoch {epoch}")
                 break
 
-    # ── Test evaluation ────────────────────────────────────
+    #  Test evaluation 
     print(f"\n{'='*60}")
     print(f"  Test Evaluation  [{mode.upper()}]")
     print(f"{'='*60}")
@@ -447,11 +430,11 @@ def train(freeze_encoders: bool):
     print(f"  Test AUROC    : {test_auroc:.4f}")
     print(f"\n{classification_report(labels, preds, target_names=['Benign','Cancer'])}")
 
-    # ── Save plots ─────────────────────────────────────────
+    #  Save plots 
     save_training_curves(history, CFG["results_dir"], mode)
     save_confusion_matrix(labels, preds, CFG["results_dir"], mode)
 
-    # ── Save results JSON ──────────────────────────────────
+    #  Save results JSON 
     results = {
         "model"         : f"CrossModal Fusion [{mode}]",
         "best_val_auroc": round(best_auroc, 4),
@@ -463,15 +446,13 @@ def train(freeze_encoders: bool):
     with open(CFG["results_dir"] / f"results_{mode}.json", "w") as f:
         json.dump(results, f, indent=2)
 
-    print(f"\n  ✓ Results saved → {CFG['results_dir']}")
+    print(f"\n  Results saved → {CFG['results_dir']}")
     print(f"  Best Val AUROC : {best_auroc:.4f}")
     print(f"  Test AUROC     : {test_auroc:.4f}")
     print(f"{'='*60}\n")
 
 
-# ══════════════════════════════════════════════════════════
 # ENTRY POINT
-# ══════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

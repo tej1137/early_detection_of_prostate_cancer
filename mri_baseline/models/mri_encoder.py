@@ -6,11 +6,6 @@ models/mri_encoder.py
 Input:  [B, 3, 20, 256, 256]  — batch of MRI volumes, 3 channels
 Output: [B, 512]               — batch of embedding vectors
 
-Architecture based on:
-- 3D U-Net style encoder (Çiçek et al., MICCAI 2016)
-- Batch normalisation (Ioffe & Szegedy, 2015)
-- Global Average Pooling (Lin et al., 2013)
-
 The 3D approach captures inter-slice relationships which 2.5D misses.
 For example, a lesion that appears across multiple slices is easier
 to identify in 3D than looking at slices independently.
@@ -84,7 +79,7 @@ class MRIEncoder(nn.Module):
                  dropout:       float = 0.3):
         super().__init__()
 
-        # ── 3D Convolutional backbone ──────────────────────
+        # 3D Convolutional backbone 
         self.conv_blocks = nn.Sequential(
             Conv3DBlock(in_channels, 32,  pool=True),   # 20×256×256 → 10×128×128
             Conv3DBlock(32,          64,  pool=True),   # 10×128×128 → 5×64×64
@@ -92,18 +87,18 @@ class MRIEncoder(nn.Module):
             Conv3DBlock(128,         256, pool=True),   # 2×32×32    → 1×16×16
         )
 
-        # ── Global Average Pooling ─────────────────────────
+        # Global Average Pooling
         # Takes [B, 256, 1, 16, 16] → [B, 256]
         self.global_avg_pool = nn.AdaptiveAvgPool3d(1)
 
-        # ── Projection head ────────────────────────────────
+        # Projection head
         self.projection = nn.Sequential(
             nn.Dropout(dropout),
             nn.Linear(256, embedding_dim),
             nn.ReLU(inplace=True),
         )
 
-        # ── Weight initialisation ──────────────────────────
+        # Weight initialisation
         self._initialise_weights()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -186,9 +181,9 @@ class MRIClassifier(nn.Module):
         return probs[:, 1]   # cancer class
 
 
-# ─────────────────────────────────────────────────────────────
+#─
 # Sanity check
-# ─────────────────────────────────────────────────────────────
+#─
 if __name__ == "__main__":
     print("=" * 50)
     print("3D MRI Encoder — Sanity Check")
@@ -201,7 +196,7 @@ if __name__ == "__main__":
         print(f"GPU: {torch.cuda.get_device_name(0)}")
         print(f"Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
 
-    # ── Test MRIEncoder ────────────────────────────────────
+    # Test MRIEncoder
     print("\n[1] Testing MRIEncoder...")
     encoder = MRIEncoder(in_channels=3, embedding_dim=512).to(device)
 
@@ -211,9 +206,9 @@ if __name__ == "__main__":
     print(f"  Input shape     : {dummy_input.shape}")
     print(f"  Embedding shape : {embedding.shape}")
     assert embedding.shape == (2, 512), "Wrong embedding shape!"
-    print("  ✓ PASSED")
+    print("  PASSED")
 
-    # ── Test MRIClassifier ─────────────────────────────────
+    # Test MRIClassifier─
     print("\n[2] Testing MRIClassifier...")
     classifier = MRIClassifier(in_channels=3, embedding_dim=512).to(device)
 
@@ -225,9 +220,9 @@ if __name__ == "__main__":
     print(f"  Probabilities: {probs.detach().cpu().numpy()}")
     assert logits.shape == (2, 2), "Wrong logits shape!"
     assert probs.shape  == (2,),   "Wrong proba shape!"
-    print("  ✓ PASSED")
+    print(" PASSED")
 
-    # ── Memory usage ───────────────────────────────────────
+    # Memory usage─
     if torch.cuda.is_available():
         mem_allocated = torch.cuda.memory_allocated(0) / 1e9
         mem_reserved  = torch.cuda.memory_reserved(0) / 1e9
@@ -235,7 +230,7 @@ if __name__ == "__main__":
         print(f"  Allocated: {mem_allocated:.2f} GB")
         print(f"  Reserved:  {mem_reserved:.2f} GB")
 
-    # ── Parameter count ────────────────────────────────────
+    # Parameter count
     total_params = sum(p.numel() for p in classifier.parameters())
     train_params = sum(p.numel() for p in classifier.parameters()
                        if p.requires_grad)
@@ -243,4 +238,4 @@ if __name__ == "__main__":
     print(f"  Total parameters    : {total_params:,}")
     print(f"  Trainable parameters: {train_params:,}")
 
-    print("\n✓ SANITY CHECK PASSED — 3D model ready for training")
+    print("\n SANITY CHECK PASSED — 3D model ready for training")

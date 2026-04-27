@@ -52,20 +52,15 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 from contrastive.crossmodal_dataset import get_crossmodal_loader  # lives in contrastive/, not contrastive/clip/
 from contrastive.clip.clip_model    import CLIPModel, CLIPModelB, CLIPLoss
 
-
-# ══════════════════════════════════════════════════════════
-# CONFIG
-# ══════════════════════════════════════════════════════════
-
 CFG = {
     # Training
     "epochs"              : 100,
-    "batch_size"          : 32,       # RTX 5090 32GB — more negatives = better
+    "batch_size"          : 32,     
     "num_workers"         : 4,
 
     # Separate LRs for MRI vs clinical encoder
-    # MRI encoder is larger + more sensitive → lower LR
-    # Clinical encoder is small + random    → higher LR
+    # MRI encoder is larger + more sensitive 
+    # Clinical encoder is small + random 
     "lr_mri_encoder"      : 1e-4,
     "lr_clinical_encoder" : 3e-4,
     "lr_projectors"       : 3e-4,
@@ -91,9 +86,8 @@ CFG = {
 }
 
 
-# ══════════════════════════════════════════════════════════
+
 # TRAINING LOOP
-# ══════════════════════════════════════════════════════════
 
 def train(option: str, freeze_mri: bool = False):
     """
@@ -151,7 +145,7 @@ def train(option: str, freeze_mri: bool = False):
 
     loss_fn = CLIPLoss()
 
-    # ── Separate param groups — different LRs ─────────────
+    #Separate param groups — different LRs
     # This is the key difference vs train_crossmodal.py which
     # uses a single LR for everything
     param_groups = [
@@ -198,7 +192,7 @@ def train(option: str, freeze_mri: bool = False):
 
     scaler = GradScaler()
 
-    # ── Dataloader ─────────────────────────────────────────
+    #Dataloader
     loader = get_crossmodal_loader(
         batch_size  = CFG["batch_size"],
         num_workers = CFG["num_workers"],
@@ -206,13 +200,13 @@ def train(option: str, freeze_mri: bool = False):
         augment     = True,
     )
 
-    # ── Print model summary ────────────────────────────────
+    #Print model summary
     total_params   = sum(p.numel() for p in model.parameters())
     trainable      = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"  Model parameters : {total_params:,}  ({trainable:,} trainable)")
     print(f"  Batches/epoch    : {len(loader)}\n")
 
-    # ── Log file ───────────────────────────────────────────
+    #Log file
     log_path = ckpt_dir / "pretrain_log.csv"
     with open(log_path, "w", newline="") as f:
         csv.writer(f).writerow([
@@ -220,7 +214,7 @@ def train(option: str, freeze_mri: bool = False):
             "pos_sim", "neg_sim", "temperature", "lr_mri", "epoch_time_s",
         ])
 
-    # ── Training ───────────────────────────────────────────
+    # Training
     best_loss = float("inf")
 
     for epoch in range(1, CFG["epochs"] + 1):
@@ -263,7 +257,7 @@ def train(option: str, freeze_mri: bool = False):
 
         scheduler.step()
 
-        # ── Epoch stats ────────────────────────────────────
+        #Epoch stats
         n          = len(loader)
         avg_loss   = epoch_loss      / n
         avg_mri    = epoch_loss_mri  / n
@@ -297,7 +291,7 @@ def train(option: str, freeze_mri: bool = False):
                 round(epoch_time,1),
             ])
 
-        # ── Checkpoint ─────────────────────────────────────
+        #Checkpoint
         if avg_loss < best_loss:
             best_loss = avg_loss
 
@@ -322,7 +316,7 @@ def train(option: str, freeze_mri: bool = False):
 
             print(f"  ✓ Best model saved  (loss: {best_loss:.4f})")
 
-    # ── Final checkpoint ───────────────────────────────────
+    # Final checkpoint
     torch.save({
         "epoch"      : CFG["epochs"],
         "option"     : option,
@@ -341,9 +335,8 @@ def train(option: str, freeze_mri: bool = False):
     print(f"\n  Next: run train_fusion_clip.py --option_{option.lower()}")
 
 
-# ══════════════════════════════════════════════════════════
-# ENTRY POINT
-# ══════════════════════════════════════════════════════════
+
+#Entry point
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(

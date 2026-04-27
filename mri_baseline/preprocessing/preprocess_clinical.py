@@ -3,7 +3,6 @@ preprocessing/preprocess_clinical.py
 
 ONE-TIME preprocessing script for PI-CAI clinical data.
 
-What this does:
   Loads raw marksheet.csv → cleans → validates → saves clean CSV + norm stats
 
 Run once:
@@ -19,22 +18,16 @@ import numpy as np
 import json
 from pathlib import Path
 
-
-# ══════════════════════════════════════════════════════════
-# CONFIGURATION
-# Edit paths here for local vs RunPod
-# ══════════════════════════════════════════════════════════
-
 class Config:
-    # ── Input ──────────────────────────────────────────────
+    # Input
     marksheet_path = Path("F:/MOD002691 - FP/pi_cai_project/picai_labels/clinical_information/marksheet.csv")
 
-    # ── Output ─────────────────────────────────────────────
+    # Output─
     output_dir   = Path("F:/MOD002691 - FP/pi_cai_project/picai_labels/clinical_information/preprocessed")
     output_csv   = output_dir / "clinical_preprocessed.csv"
     output_stats = output_dir / "norm_stats.json"
 
-    # ── Features ───────────────────────────────────────────
+    # Features
     # These 4 features feed into PSAEncoder
     clinical_features = ["psa", "psad", "prostate_volume", "patient_age"]
     target_col        = "case_csPCa"
@@ -43,12 +36,12 @@ class Config:
     # PSAD = PSA / prostate_volume
     psa_trio = ["psa", "psad", "prostate_volume"]
 
-    # ── Validation thresholds ──────────────────────────────
+    # Validation thresholds
     # Max allowed error between reported PSAD and computed PSA/volume
     # Cases above this threshold have unreliable PSAD values
     psad_consistency_threshold = 1.0   # ng/mL²  (was 6.93 in raw data)
 
-    # ── Known missing MRI cases ────────────────────────────
+    # Known missing MRI cases
     # These patients have no MRI files on disk at all.
     # We exclude them here so the same clean CSV works for
     # both PSA-only and MRI+PSA training.
@@ -60,7 +53,7 @@ class Config:
 ]
     # Note: 10403 has no study_id known — handled by MRI audit
 
-    # ── Train/val/test split ratios ─────────────────────────
+    # Train/val/test split ratios─
     train_ratio = 0.70
     val_ratio   = 0.15
     # test_ratio  = 0.15  (remainder)
@@ -68,11 +61,6 @@ class Config:
 
     def __init__(self):
         self.output_dir.mkdir(parents=True, exist_ok=True)
-
-
-# ══════════════════════════════════════════════════════════
-# STEP 1 — LOAD RAW DATA
-# ══════════════════════════════════════════════════════════
 
 def load_raw(config: Config) -> pd.DataFrame:
     """
@@ -104,11 +92,7 @@ def load_raw(config: Config) -> pd.DataFrame:
 
     return df
 
-
-# ══════════════════════════════════════════════════════════
-# STEP 2 — FIX PSA TRIO DEPENDENCIES
-# ══════════════════════════════════════════════════════════
-
+#FIX PSA TRIO DEPENDENCIES
 def fix_psa_trio(df: pd.DataFrame, config: Config) -> pd.DataFrame:
     """
     Handle the mathematical dependency between PSA, PSAD, and prostate_volume.
@@ -145,14 +129,14 @@ def fix_psa_trio(df: pd.DataFrame, config: Config) -> pd.DataFrame:
     if mask.sum() > 0:
         df.loc[mask, "psad"] = df.loc[mask, "psa"] / df.loc[mask, "prostate_volume"]
         computed["psad"] = mask.sum()
-        print(f"\n  ✓ Computed PSAD for {computed['psad']} cases  (PSA ÷ volume)")
+        print(f"\n  Computed PSAD for {computed['psad']} cases  (PSA ÷ volume)")
 
     # Case B: compute PSA from PSAD × volume
     mask = df["psa"].isna() & df["psad"].notna() & df["prostate_volume"].notna()
     if mask.sum() > 0:
         df.loc[mask, "psa"] = df.loc[mask, "psad"] * df.loc[mask, "prostate_volume"]
         computed["psa"] = mask.sum()
-        print(f"  ✓ Computed PSA  for {computed['psa']} cases  (PSAD × volume)")
+        print(f"  Computed PSA  for {computed['psa']} cases  (PSAD × volume)")
 
     # Case C: compute volume from PSA / PSAD (guard against divide by zero)
     mask = df["prostate_volume"].isna() & df["psa"].notna() & df["psad"].notna()
@@ -160,16 +144,14 @@ def fix_psa_trio(df: pd.DataFrame, config: Config) -> pd.DataFrame:
         safe = mask & (df["psad"] > 0)
         df.loc[safe, "prostate_volume"] = df.loc[safe, "psa"] / df.loc[safe, "psad"]
         computed["prostate_volume"] = safe.sum()
-        print(f"  ✓ Computed vol  for {computed['prostate_volume']} cases  (PSA ÷ PSAD)")
+        print(f"  Computed vol  for {computed['prostate_volume']} cases  (PSA ÷ PSAD)")
 
     total_computed = sum(computed.values())
     print(f"\n  Total values recovered: {total_computed}")
     return df
 
 
-# ══════════════════════════════════════════════════════════
-# STEP 3 — DROP INCOMPLETE CASES
-# ══════════════════════════════════════════════════════════
+#DROP INCOMPLETE CASES
 
 def drop_incomplete(df: pd.DataFrame, config: Config) -> pd.DataFrame:
     """
@@ -197,9 +179,7 @@ def drop_incomplete(df: pd.DataFrame, config: Config) -> pd.DataFrame:
     return df
 
 
-# ══════════════════════════════════════════════════════════
-# STEP 4 — FIX PSAD INCONSISTENCIES
-# ══════════════════════════════════════════════════════════
+#FIX PSAD INCONSISTENCIES
 
 def fix_psad_consistency(df: pd.DataFrame, config: Config) -> pd.DataFrame:
     """
@@ -236,19 +216,17 @@ def fix_psad_consistency(df: pd.DataFrame, config: Config) -> pd.DataFrame:
     # For consistent cases: recompute PSAD to ensure mathematical consistency
     consistent_mask = error < config.psad_consistency_threshold
     df.loc[consistent_mask, "psad"] = computed_psad[consistent_mask]
-    print(f"\n  ✓ Recomputed PSAD for {consistent} consistent cases")
+    print(f"\n  Recomputed PSAD for {consistent} consistent cases")
 
     # Drop inconsistent cases
     before = len(df)
     df = df[consistent_mask].copy()
-    print(f"  ✓ Dropped {before - len(df)} inconsistent cases")
+    print(f"  Dropped {before - len(df)} inconsistent cases")
     print(f"  Remaining: {len(df)}")
     return df
 
 
-# ══════════════════════════════════════════════════════════
-# STEP 5 — HANDLE AGE
-# ══════════════════════════════════════════════════════════
+#HANDLE AGE
 
 def handle_age(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -268,13 +246,11 @@ def handle_age(df: pd.DataFrame) -> pd.DataFrame:
         df["patient_age"] = df["patient_age"].fillna(median_age)
         print(f"  Imputed {missing} missing ages with median: {median_age:.1f}")
     else:
-        print(f"  No missing age values ✓")
+        print(f"  No missing age values")
     return df
 
 
-# ══════════════════════════════════════════════════════════
-# STEP 6 — REMOVE KNOWN MISSING MRI CASES
-# ══════════════════════════════════════════════════════════
+#REMOVE KNOWN MISSING MRI CASES
 
 def remove_missing_mri(df: pd.DataFrame, config: Config) -> pd.DataFrame:
     """
@@ -303,9 +279,7 @@ def remove_missing_mri(df: pd.DataFrame, config: Config) -> pd.DataFrame:
     return df
 
 
-# ══════════════════════════════════════════════════════════
-# STEP 7 — ENCODE TARGET
-# ══════════════════════════════════════════════════════════
+#ENCODE TARGET
 
 def encode_target(df: pd.DataFrame, config: Config) -> pd.DataFrame:
     print("\n" + "═"*60)
@@ -337,9 +311,7 @@ def encode_target(df: pd.DataFrame, config: Config) -> pd.DataFrame:
     return df
 
 
-# ══════════════════════════════════════════════════════════
-# STEP 8 — TRAIN/VAL/TEST SPLIT
-# ══════════════════════════════════════════════════════════
+#TRAIN/VAL/TEST SPLIT
 
 def stratified_split(df: pd.DataFrame, config: Config) -> pd.DataFrame:
     """
@@ -394,9 +366,7 @@ def stratified_split(df: pd.DataFrame, config: Config) -> pd.DataFrame:
     return df
 
 
-# ══════════════════════════════════════════════════════════
-# STEP 9 — COMPUTE NORMALISATION STATS
-# ══════════════════════════════════════════════════════════
+#COMPUTE NORMALISATION STATS
 
 def compute_norm_stats(df: pd.DataFrame, config: Config) -> dict:
     """
@@ -435,9 +405,7 @@ def compute_norm_stats(df: pd.DataFrame, config: Config) -> dict:
     return stats
 
 
-# ══════════════════════════════════════════════════════════
-# STEP 10 — VALIDATE & SAVE
-# ══════════════════════════════════════════════════════════
+#VALIDATE & SAVE
 
 def validate_and_save(df: pd.DataFrame, stats: dict, config: Config):
     """
@@ -460,31 +428,31 @@ def validate_and_save(df: pd.DataFrame, stats: dict, config: Config):
     # Check 1: No missing values
     missing = df[config.clinical_features].isna().sum().sum()
     if missing > 0:
-        errors.append(f"❌ {missing} missing values remain in clinical features")
+        errors.append(f"{missing} missing values remain in clinical features")
     else:
-        print("  ✓ No missing values in clinical features")
+        print("  No missing values in clinical features")
 
     # Check 2: Target is binary
     unique_labels = df[config.target_col].unique()
     if not set(unique_labels).issubset({0, 1}):
-        errors.append(f"❌ Non-binary labels found: {unique_labels}")
+        errors.append(f" Non-binary labels found: {unique_labels}")
     else:
-        print(f"  ✓ Target labels are binary (0/1)")
+        print(f"  Target labels are binary (0/1)")
 
     # Check 3: Split column correct
     valid_splits = {"train", "val", "test"}
     if not set(df["split"].unique()).issubset(valid_splits):
-        errors.append(f"❌ Invalid split values: {df['split'].unique()}")
+        errors.append(f" Invalid split values: {df['split'].unique()}")
     else:
-        print(f"  ✓ Split column correct")
+        print(f"  Split column correct")
 
     # Check 4: PSAD consistency after recomputation
     computed = df["psa"] / df["prostate_volume"]
     max_err  = (df["psad"] - computed).abs().max()
     if max_err > config.psad_consistency_threshold:
-        errors.append(f"❌ PSAD still inconsistent after fix (max error: {max_err:.4f})")
+        errors.append(f" PSAD still inconsistent after fix (max error: {max_err:.4f})")
     else:
-        print(f"  ✓ PSAD consistent (max error: {max_err:.6f})")
+        print(f"  PSAD consistent (max error: {max_err:.6f})")
 
     # Raise if any errors
     if errors:
@@ -496,19 +464,17 @@ def validate_and_save(df: pd.DataFrame, stats: dict, config: Config):
     # Save CSV
     cols_to_save = config.clinical_features + [config.target_col, "split"]
     df[cols_to_save].to_csv(config.output_csv)
-    print(f"\n  ✓ Saved: {config.output_csv}")
+    print(f"\n  Saved: {config.output_csv}")
     print(f"    Rows: {len(df)}")
     print(f"    Columns: {cols_to_save}")
 
     # Save norm stats
     with open(config.output_stats, 'w') as f:
         json.dump(stats, f, indent=2)
-    print(f"  ✓ Saved: {config.output_stats}")
+    print(f"  Saved: {config.output_stats}")
 
 
-# ══════════════════════════════════════════════════════════
 # MAIN
-# ══════════════════════════════════════════════════════════
 
 def main():
     print("=" * 60)

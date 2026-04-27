@@ -18,9 +18,8 @@ from torch.utils.data import Dataset, DataLoader
 import pandas as pd
 
 
-# ══════════════════════════════════════════════════════════
-# AUGMENTATION — stronger than supervised, applied twice
-# ══════════════════════════════════════════════════════════
+#AUGMENTATION — stronger than supervised, applied twice
+
 
 def get_contrastive_transform():
     return tio.Compose([
@@ -33,9 +32,6 @@ def get_contrastive_transform():
     ])
 
 
-# ══════════════════════════════════════════════════════════
-# DATASET
-# ══════════════════════════════════════════════════════════
 
 class ContrastiveDataset(Dataset):
     """
@@ -72,7 +68,7 @@ class ContrastiveDataset(Dataset):
 
         mri = torch.load(mri_path, weights_only=True)   # (3, 20, 160, 160)
 
-        # Apply transform twice independently → two different views
+        # Apply transform twice independently two different views
         view1 = self._apply_transform(mri)
         view2 = self._apply_transform(mri)
 
@@ -86,9 +82,6 @@ class ContrastiveDataset(Dataset):
         return result.permute(0, 3, 2, 1).float().clamp(0.0, 1.0)
 
 
-# ══════════════════════════════════════════════════════════
-# DATALOADER FACTORY
-# ══════════════════════════════════════════════════════════
 
 def get_contrastive_loader(
     batch_size  : int  = 16,

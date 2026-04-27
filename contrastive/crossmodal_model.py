@@ -15,19 +15,6 @@ Loss: Symmetric InfoNCE (identical to CLIP's contrastive objective)
 
     Loss = 0.5 × [InfoNCE(MRI→Clinical) + InfoNCE(Clinical→MRI)]
 
-    This is exactly CLIP's loss but with MRI replacing images and
-    clinical features replacing text tokens.
-
-Why this is better than your current approach:
-    Current:  SimCLR pretrains MRI alone. PSA encoder is always random.
-              The two modalities never interact during pretraining.
-
-    This:     MRI and clinical encoders are trained TOGETHER.
-              A patient's MRI embedding and clinical embedding are pulled
-              to the same point in the shared 128-dim space.
-              After pretraining, both encoders understand "the same patient".
-
-Transfer:
     After pretraining, DISCARD both projection heads.
     Load MRIEncoder(512) + PSAEncoder(128) weights into fusion model.
     Fine-tune with cross-entropy for classification.
@@ -47,9 +34,7 @@ from mri_baseline.models.mri_encoder import MRIEncoder
 from mri_baseline.models.psa_encoder import PSAEncoder
 
 
-# ══════════════════════════════════════════════════════════
-# PROJECTION HEADS
-# ══════════════════════════════════════════════════════════
+#Projection Heads. 
 
 class MRIProjectionHead(nn.Module):
     """
@@ -97,9 +82,7 @@ class ClinicalProjectionHead(nn.Module):
         return F.normalize(self.net(x), dim=1)   # (B, 128) unit sphere
 
 
-# ══════════════════════════════════════════════════════════
-# CROSS-MODAL MODEL
-# ══════════════════════════════════════════════════════════
+#Cross-modal contrastive model
 
 class CrossModalModel(nn.Module):
     """
@@ -125,14 +108,14 @@ class CrossModalModel(nn.Module):
     ):
         super().__init__()
 
-        # ── Encoders ───────────────────────────────────────
+        # Encoders
         self.mri_encoder      = MRIEncoder(embedding_dim=mri_encoder_dim)
         self.clinical_encoder = PSAEncoder(
             in_features   = 4,
             embedding_dim = clinical_encoder_dim,
         )
 
-        # ── Projection heads — discarded after pretraining ─
+        # Projection heads — discarded after pretraining
         self.mri_projector      = MRIProjectionHead(
             in_dim     = mri_encoder_dim,
             hidden_dim = 256,
@@ -144,7 +127,7 @@ class CrossModalModel(nn.Module):
             out_dim    = proj_out_dim,
         )
 
-        # ── Learnable temperature (log scale for stability) ─
+        #Learnable temperature (log scale for stability) ─
         # Initialised to match fixed temperature=0.07
         # log(0.07) ≈ -2.66
         self.log_temperature = nn.Parameter(
@@ -198,10 +181,7 @@ class CrossModalModel(nn.Module):
         """Returns clinical encoder state dict for transfer to fusion model."""
         return self.clinical_encoder.state_dict()
 
-
-# ══════════════════════════════════════════════════════════
 # INFONCE LOSS  (symmetric — identical to CLIP loss)
-# ══════════════════════════════════════════════════════════
 
 class InfoNCELoss(nn.Module):
     """
@@ -219,11 +199,6 @@ class InfoNCELoss(nn.Module):
             Loss = cross_entropy(sim_matrix_col_i, label=i)
 
         Total loss = mean of both directions (symmetric)
-
-    Why symmetric?
-        We want BOTH encoders to learn the alignment, not just one.
-        MRI encoder learns to predict "which clinical profile matches?"
-        Clinical encoder learns to predict "which MRI matches?"
 
     The temperature controls sharpness:
         Low temperature  → sharp distribution → harder negatives

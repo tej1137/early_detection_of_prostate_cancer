@@ -39,10 +39,6 @@ except ImportError:
     print("  ⚠ SHAP not installed — using Gradient x Input instead")
     print("    pip install shap   to get official SHAP values")
 
-# ══════════════════════════════════════════════════════════
-# CONFIG
-# ══════════════════════════════════════════════════════════
-
 CFG = {
     "model_ckpt"  : ROOT / "checkpoints" / "crossmodal" / "fusion_crossmodal_unfrozen.pt",
     "clinical_csv": ROOT / "pi_cai_project" / "picai_labels" / "clinical_information" / "preprocessed" / "clinical_preprocessed.csv",
@@ -59,9 +55,9 @@ FEATURE_COLS  = ["psa", "psad", "prostate_volume", "patient_age"]
 CFG["output_dir"].mkdir(parents=True, exist_ok=True)
 
 
-# ══════════════════════════════════════════════════════════
-# CLINICAL-ONLY MODEL  (no MRI encoder — avoids 14GB RAM)
-# ══════════════════════════════════════════════════════════
+
+# CLINICAL-ONLY MODEL  (no MRI encoder — avoids 14GB RAM and saves me moneyyy)
+
 
 class ClinicalBranch(torch.nn.Module):
     """
@@ -114,13 +110,13 @@ def load_model():
     print(f"  Missing keys   : {missing}")
     print(f"  Unexpected keys: {unexpected}")
     model.eval()
-    print("  ✓ Clinical branch loaded\n")
+    print("  Clinical branch loaded\n")
     return model
 
 
-# ══════════════════════════════════════════════════════════
+
 # DATA
-# ══════════════════════════════════════════════════════════
+
 
 def load_data():
     print("[2] Loading test set clinical data...")
@@ -147,14 +143,14 @@ def load_data():
     feat_raw  = np.array(feat_raw,  dtype=np.float32)
     labels    = np.array(labels,    dtype=np.int32)
 
-    print(f"  ✓ {len(labels)} test cases  "
+    print(f"  {len(labels)} test cases  "
           f"(Cancer: {labels.sum()}  Benign: {(labels==0).sum()})\n")
     return feat_norm, feat_raw, labels
 
 
-# ══════════════════════════════════════════════════════════
+
 # ATTRIBUTION
-# ══════════════════════════════════════════════════════════
+
 
 def compute_shap_values(model, feat_norm):
     """Use SHAP KernelExplainer on clinical-only branch."""
@@ -193,9 +189,9 @@ def compute_gradient_attribution(model, feat_norm):
     return attr, probs
 
 
-# ══════════════════════════════════════════════════════════
-# FIGURE 1 — BEESWARM
-# ══════════════════════════════════════════════════════════
+
+#Plot — BEESWARM
+
 
 def plot_beeswarm(attr_vals, feat_raw_subset, labels_subset, method):
     print("[4] Saving Figure 1 — beeswarm plot...")
@@ -239,12 +235,12 @@ def plot_beeswarm(attr_vals, feat_raw_subset, labels_subset, method):
     out = CFG["output_dir"] / "fig1_beeswarm.png"
     fig.savefig(out, dpi=200, bbox_inches="tight")
     plt.close(fig)
-    print(f"  ✓ Saved {out}\n")
+    print(f"  Saved {out}\n")
 
 
-# ══════════════════════════════════════════════════════════
-# FIGURE 2 — IMPORTANCE BAR
-# ══════════════════════════════════════════════════════════
+
+# Plot 2 — IMPORTANCE BAR
+
 
 def plot_importance_bar(attr_vals, method):
     print("[5] Saving Figure 2 — importance bar chart...")
@@ -279,12 +275,12 @@ def plot_importance_bar(attr_vals, method):
     out = CFG["output_dir"] / "fig2_importance_bar.png"
     fig.savefig(out, dpi=200, bbox_inches="tight")
     plt.close(fig)
-    print(f"  ✓ Saved {out}\n")
+    print(f"  Saved {out}\n")
 
 
-# ══════════════════════════════════════════════════════════
-# FIGURE 3 — CANCER VS BENIGN
-# ══════════════════════════════════════════════════════════
+
+# Plot 3 — CANCER VS BENIGN
+
 
 def plot_cancer_vs_benign(attr_vals, labels_subset, method):
     print("[6] Saving Figure 3 — cancer vs benign...")
@@ -328,14 +324,14 @@ def plot_cancer_vs_benign(attr_vals, labels_subset, method):
     out = CFG["output_dir"] / "fig3_cancer_vs_benign.png"
     fig.savefig(out, dpi=200, bbox_inches="tight")
     plt.close(fig)
-    print(f"  ✓ Saved {out}\n")
+    print(f" Saved {out}\n")
 
     return c_mean, b_mean
 
 
-# ══════════════════════════════════════════════════════════
+
 # MAIN
-# ══════════════════════════════════════════════════════════
+
 
 def main():
     print("=" * 60)
@@ -345,7 +341,7 @@ def main():
     model             = load_model()
     feat_norm, feat_raw, labels = load_data()
 
-    # ── Choose attribution method ──────────────────────────
+    # Choose attribution method 
     if HAS_SHAP:
         attr_vals, feat_subset = compute_shap_values(model, feat_norm)
         labels_subset = labels[:100]
@@ -358,7 +354,7 @@ def main():
         labels_subset = labels
         method       = "Grad×Input"
 
-    # ── Importance summary ─────────────────────────────────
+    # Importance summary 
     mean_abs = np.abs(attr_vals).mean(axis=0)
     order    = np.argsort(mean_abs)[::-1]
 
@@ -373,12 +369,12 @@ def main():
               f"cancer={cm_:+.4f}  {dirn}")
     print()
 
-    # ── Save figures ───────────────────────────────────────
+    #  =Save figures
     plot_beeswarm(attr_vals, feat_raw_sub, labels_subset, method)
     plot_importance_bar(attr_vals, method)
     c_mean, b_mean = plot_cancer_vs_benign(attr_vals, labels_subset, method)
 
-    # ── Save JSON ──────────────────────────────────────────
+    # Save JSON
     results = {
         "method"          : method,
         "model"           : "CrossModal Fusion unfrozen (AUROC 0.8138)",

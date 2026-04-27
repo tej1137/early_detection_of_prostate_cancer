@@ -1,44 +1,8 @@
-"""
-bimri/models/bimri_encoder.py
-
-3D CNN Encoder for bi-parametric MRI (T2W + ADC only).
-
-Identical architecture to mri_baseline/models/mri_encoder.py
-with ONE change: in_channels=2 instead of 3.
-
-This is intentional — we want a FAIR comparison:
-    mpMRI model: same architecture, in_channels=3, trained on T2W+ADC+HBV
-    biMRI model: same architecture, in_channels=2, trained on T2W+ADC only
-
-If biMRI achieves similar AUROC to mpMRI, it suggests HBV adds
-limited discriminative value and a simpler acquisition protocol suffices.
-
-Architecture:
-    Input  [B, 2, 20, 160, 160]       ← 2 channels instead of 3
-      ↓ Conv3DBlock(2 → 32)  + pool  →  [B, 32,  10, 80,  80 ]
-      ↓ Conv3DBlock(32 → 64) + pool  →  [B, 64,  5,  40,  40 ]
-      ↓ Conv3DBlock(64 → 128)+ pool  →  [B, 128, 2,  20,  20 ]
-      ↓ Conv3DBlock(128→ 256)+ pool  →  [B, 256, 1,  10,  10 ]
-      ↓ GlobalAvgPool3D               →  [B, 256]
-      ↓ Dropout + Linear(256→512)    →  [B, 512]
-    Output [B, 512]
-
-    Note: spatial dims differ slightly from mpMRI encoder because
-    input is (20, 160, 160) — after 4 poolings: (1, 10, 10).
-    Global average pooling handles this — output is always (B, 256).
-
-Usage:
-    from bimri.models.bimri_encoder import BiMRIEncoder, BiMRIClassifier
-"""
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-
-# ══════════════════════════════════════════════════════════
-# CONV BLOCK  (identical to mri_encoder.py)
-# ══════════════════════════════════════════════════════════
+#Conv3DBlock is identical to mri_encoder.py - reused without modification.
 
 class Conv3DBlock(nn.Module):
     """
@@ -69,9 +33,7 @@ class Conv3DBlock(nn.Module):
         return self.block(x)
 
 
-# ══════════════════════════════════════════════════════════
-# BIMRI ENCODER
-# ══════════════════════════════════════════════════════════
+#BiMRI Encoder and Classifier
 
 class BiMRIEncoder(nn.Module):
     """
@@ -88,14 +50,14 @@ class BiMRIEncoder(nn.Module):
 
     def __init__(
         self,
-        in_channels  : int   = 2,      # ← KEY DIFFERENCE: 2 not 3
+        in_channels  : int   = 2,      #2 not 3
         embedding_dim: int   = 512,
         dropout      : float = 0.3,
     ):
         super().__init__()
 
-        # ── 3D Convolutional backbone ──────────────────────
-        # Identical channel progression to MRIEncoder
+        #3D Convolutional 
+        #Identical channel progression to MRIEncoder
         self.conv_blocks = nn.Sequential(
             Conv3DBlock(in_channels, 32,  pool=True),
             Conv3DBlock(32,          64,  pool=True),
@@ -103,11 +65,11 @@ class BiMRIEncoder(nn.Module):
             Conv3DBlock(128,         256, pool=True),
         )
 
-        # ── Global Average Pooling ─────────────────────────
-        # AdaptiveAvgPool3d handles any spatial size → always (B, 256)
+        #GAPPP 
+        #AdaptiveAvgPool3d handles any spatial size -- always (B, 256)
         self.global_avg_pool = nn.AdaptiveAvgPool3d(1)
 
-        # ── Projection ─────────────────────────────────────
+        #Projection
         self.projection = nn.Sequential(
             nn.Dropout(dropout),
             nn.Linear(256, embedding_dim),
@@ -124,10 +86,10 @@ class BiMRIEncoder(nn.Module):
         Returns:
             embedding : (B, 512)
         """
-        features  = self.conv_blocks(x)           # (B, 256, ?, ?, ?)
-        pooled    = self.global_avg_pool(features) # (B, 256, 1, 1, 1)
-        pooled    = pooled.flatten(start_dim=1)    # (B, 256)
-        embedding = self.projection(pooled)        # (B, 512)
+        features  = self.conv_blocks(x)          
+        pooled    = self.global_avg_pool(features) 
+        pooled    = pooled.flatten(start_dim=1)  
+        embedding = self.projection(pooled)    
         return embedding
 
     def _initialise_weights(self):
@@ -145,9 +107,6 @@ class BiMRIEncoder(nn.Module):
                 nn.init.constant_(module.bias, 0)
 
 
-# ══════════════════════════════════════════════════════════
-# BIMRI CLASSIFIER
-# ══════════════════════════════════════════════════════════
 
 class BiMRIClassifier(nn.Module):
     """
@@ -193,9 +152,7 @@ class BiMRIClassifier(nn.Module):
         return F.softmax(self.forward(x), dim=1)[:, 1]
 
 
-# ══════════════════════════════════════════════════════════
-# SANITY CHECK
-# ══════════════════════════════════════════════════════════
+#Check and parameter count
 
 if __name__ == "__main__":
     print("=" * 50)
@@ -205,8 +162,8 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"\nDevice: {device}")
 
-    # ── Test BiMRIEncoder ──────────────────────────────────
-    print("\n[1] Testing BiMRIEncoder (2 channels)...")
+    #Test BiMRIEncoder
+    print("\n[1] Testing BiMRIEncoder (2 channels)")
     encoder = BiMRIEncoder(in_channels=2, embedding_dim=512).to(device)
     dummy   = torch.randn(2, 2, 20, 160, 160).to(device)
     emb     = encoder(dummy)
@@ -215,7 +172,7 @@ if __name__ == "__main__":
     assert emb.shape == (2, 512)
     print("  ✓ PASSED")
 
-    # ── Test BiMRIClassifier ───────────────────────────────
+    #Test BiMRIClassifier
     print("\n[2] Testing BiMRIClassifier...")
     model  = BiMRIClassifier(in_channels=2).to(device)
     logits = model(dummy)
@@ -224,10 +181,10 @@ if __name__ == "__main__":
     print(f"  Probs  : {tuple(probs.shape)}")
     assert logits.shape == (2, 2)
     assert probs.shape  == (2,)
-    print("  ✓ PASSED")
+    print("PASSED")
 
-    # ── Parameter count ────────────────────────────────────
+    #Parameter count
     total = sum(p.numel() for p in model.parameters())
     print(f"\n  Total parameters : {total:,}")
     print(f"  (mpMRI encoder   : ~3,647,392 — biMRI slightly fewer due to fewer input channels)")
-    print("\n✓ SANITY CHECK PASSED — biMRI model ready")
+    print("\nSANITY CHECK PASSED biMRI model ready")

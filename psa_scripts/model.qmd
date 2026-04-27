@@ -28,7 +28,7 @@ from sklearn.metrics import (
     f1_score,
 )
 
-# -------- paths (edit) --------
+#  paths
 train_csv = r"F:\MOD002691 - FP\pi_cai_project\picai_labels\clinical_information\preprocessed_data\preprocessed_train.csv"
 val_csv   = r"F:\MOD002691 - FP\pi_cai_project\picai_labels\clinical_information\preprocessed_data\preprocessed_val.csv"
 model_name   = "rf_train_only_1"

@@ -152,9 +152,9 @@ class PSAClassifier(nn.Module):
         return probs[:, 1]  # P(cancer)
 
 
-# ═════════════════════════════════════════════════════════
+
 # Sanity Check
-# ═════════════════════════════════════════════════════════
+
 if __name__ == "__main__":
     print("=" * 50)
     print("PSA Encoder — Sanity Check")
@@ -174,7 +174,7 @@ if __name__ == "__main__":
     print(f"  Input shape  : {dummy_input.shape}")  # [8, 4]
     print(f"  Output shape : {embedding.shape}")     # [8, 256]
     assert embedding.shape == (8, 256), "Wrong shape!"
-    print("  ✓ PASSED")
+    print("  PASSED")
     
     # Test PSAClassifier
     print("\n[2] Testing PSAClassifier...")
@@ -188,10 +188,10 @@ if __name__ == "__main__":
     print(f"  Probabilities: {probs.detach().cpu().numpy()}")
     assert logits.shape == (8, 2)
     assert probs.shape == (8,)
-    print("  ✓ PASSED")
+    print("  PASSED")
     
     # Parameter count
     total_params = sum(p.numel() for p in classifier.parameters())
     print(f"\nTotal parameters: {total_params:,}")
     
-    print("\n✓ SANITY CHECK PASSED — PSA encoder ready")
+    print("\ SANITY CHECK PASSED — PSA encoder ready")

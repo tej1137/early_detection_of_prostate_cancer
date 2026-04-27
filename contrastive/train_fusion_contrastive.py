@@ -38,10 +38,6 @@ from mri_baseline.models.psa_encoder       import PSAEncoder
 from mri_baseline.data.multimodal_dataset  import PiCAIDataset
 
 
-# ══════════════════════════════════════════════════════════
-# CONFIG
-# ══════════════════════════════════════════════════════════
-
 CFG = {
     "epochs"          : 50,
     "batch_size"      : 8,
@@ -56,10 +52,7 @@ CFG = {
     "ckpt_dir"        : Path("/workspace/checkpoints/contrastive"),
 }
 
-
-# ══════════════════════════════════════════════════════════
 # FUSION MODEL
-# ══════════════════════════════════════════════════════════
 
 class ContrastiveFusionModel(nn.Module):
     """
@@ -74,7 +67,7 @@ class ContrastiveFusionModel(nn.Module):
     def __init__(self, freeze_encoder: bool = False):
         super().__init__()
 
-        # ── MRI encoder — load pretrained weights ──────────
+        # MRI encoder — load pretrained weights
         self.mri_encoder = MRIEncoder(embedding_dim=CFG["mri_dim"])
         state = torch.load(CFG["pretrained_path"], map_location="cpu", weights_only=True)
         self.mri_encoder.load_state_dict(state)
@@ -84,11 +77,11 @@ class ContrastiveFusionModel(nn.Module):
             for param in self.mri_encoder.parameters():
                 param.requires_grad = False
 
-        # ── PSA encoder — randomly initialised ────────────
+        # PSA encoder — randomly initialised
         self.psa_encoder = PSAEncoder(embedding_dim=CFG["clinical_dim"])
 
-        # ── Fusion head ────────────────────────────────────
-        fusion_dim = CFG["mri_dim"] + CFG["clinical_dim"]   # 576
+        # Fusion head
+        fusion_dim = CFG["mri_dim"] + CFG["clinical_dim"] 
         self.head  = nn.Sequential(
             nn.Linear(fusion_dim, 256),
             nn.ReLU(inplace=True),
@@ -106,9 +99,7 @@ class ContrastiveFusionModel(nn.Module):
         return self.head(fused)                   # (B, 2)
 
 
-# ══════════════════════════════════════════════════════════
-# HELPERS
-# ══════════════════════════════════════════════════════════
+#Helpers
 
 def get_loaders():
     train_ds = PiCAIDataset(split="train")
@@ -153,10 +144,7 @@ def evaluate(model, loader, device, loss_fn):
     auroc    = roc_auc_score(all_labels, all_probs)
     return avg_loss, acc, auroc, all_preds, all_labels
 
-
-# ══════════════════════════════════════════════════════════
-# TRAINING
-# ══════════════════════════════════════════════════════════
+#Training
 
 def train(freeze_encoder: bool):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -255,7 +243,7 @@ def train(freeze_encoder: bool):
             torch.save(model.state_dict(), ckpt_path)
             print(f"  ✓ Best model saved (AUROC: {best_auroc:.3f})")
 
-    # ── Test evaluation ────────────────────────────────────
+    # Test evaluation
     print(f"\n{'='*55}")
     print(f"  Test Evaluation [{mode.upper()}]")
     print(f"{'='*55}")
@@ -267,11 +255,7 @@ def train(freeze_encoder: bool):
     print(f"  Test AUROC    : {test_auroc:.4f}")
     print(f"\n{classification_report(labels, preds, target_names=['Benign','Cancer'])}")
 
-
-# ══════════════════════════════════════════════════════════
 # ENTRY POINT
-# ══════════════════════════════════════════════════════════
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--frozen",   action="store_true")

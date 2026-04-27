@@ -30,33 +30,26 @@ from pathlib import Path
 from torch.utils.data import Dataset, DataLoader
 import torchio as tio
 
-
-# ══════════════════════════════════════════════════════════
-# CONFIGURATION
-# ══════════════════════════════════════════════════════════
-
 class DataConfig:
-    # ── Preprocessed data ─────────────────────────────────
+    # Preprocessed data─
     clinical_csv  = Path("/workspace/data/preprocessed/clinical_preprocessed.csv")
     norm_stats    = Path("/workspace/data/preprocessed/norm_stats.json")
     mri_dir       = Path("/workspace/data/preprocessed/mri")
 
-    # ── Clinical features (must match preprocess_clinical.py) ──
+    # Clinical features (must match preprocess_clinical.py)
     clinical_features = ["psa", "psad", "prostate_volume", "patient_age"]
     target_col        = "case_csPCa"
 
-    # ── DataLoader settings ────────────────────────────────
+    # DataLoader settings
     batch_size        = 8
     num_workers       = 4
     pin_memory        = True    # faster GPU transfer
 
-    # ── Augmentation (train split only) ───────────────────
+    # Augmentation (train split only) 
     augment_train     = True
 
 
-# ══════════════════════════════════════════════════════════
 # AUGMENTATION
-# ══════════════════════════════════════════════════════════
 
 def augment_mri(tensor: torch.Tensor) -> torch.Tensor:
     """
@@ -78,9 +71,9 @@ def augment_mri(tensor: torch.Tensor) -> torch.Tensor:
 
     result = transform(subject).mri.tensor.permute(0, 3, 2, 1)
     return result.float().clamp(0.0, 1.0)
-# ══════════════════════════════════════════════════════════
+
 # DATASET CLASS
-# ══════════════════════════════════════════════════════════
+
 
 class PiCAIDataset(Dataset):
     """
@@ -163,11 +156,11 @@ class PiCAIDataset(Dataset):
             "case_id" : case_id,
         }
 
-        # ── Clinical features ──────────────────────────────
+        # Clinical features
         if not self.mri_only:
             result["clinical"] = self.clinical_tensor[idx]   # (4,)
 
-        # ── MRI tensor ─────────────────────────────────────
+        # MRI tenso─
         if not self.clinical_only:
             mri_path = self.config.mri_dir / f"{case_id}.pt"
 
@@ -188,9 +181,9 @@ class PiCAIDataset(Dataset):
         return result
 
 
-# ══════════════════════════════════════════════════════════
+
 # DATALOADER FACTORY
-# ══════════════════════════════════════════════════════════
+
 
 def get_dataloaders(
     config        : DataConfig = None,
@@ -248,9 +241,9 @@ def get_dataloaders(
     return loaders
 
 
-# ══════════════════════════════════════════════════════════
+
 # QUICK SANITY CHECK
-# ══════════════════════════════════════════════════════════
+
 
 def sanity_check(config: DataConfig = None):
     """
@@ -271,7 +264,7 @@ def sanity_check(config: DataConfig = None):
     loaders = get_dataloaders(config)
 
     for split, loader in loaders.items():
-        print(f"\n── {split.upper()} ──")
+        print(f"\ {split.upper()}")
 
         batch = next(iter(loader))
 
